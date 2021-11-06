@@ -12,12 +12,12 @@ impl Command {
         return Command { cfg: cfg };
     }
 
-    pub fn add_rules(&self, rules: &Vec<&str>) -> Result<()> {
+    pub fn add_rules(&mut self, rules: &Vec<&str>) -> Result<()> {
         return self.cfg.rules.add(rules);
     }
 
     pub fn list(&self) {
-        let rules = self.cfg.rules.get().unwrap();
+        let rules = self.cfg.rules.get();
         let mut total: u64 = 0;
         for r in rules {
             let size = match fs::get_size(&r) {

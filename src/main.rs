@@ -18,7 +18,7 @@ fn main() {
         .get_matches();
 
     let cfg = Config::new(".clir");
-    let cmd = Command::new(cfg);
+    let mut cmd = Command::new(cfg);
 
     match matches.subcommand() {
         Some(("add", p)) => {
