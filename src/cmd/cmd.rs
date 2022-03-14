@@ -9,11 +9,15 @@ pub struct Command {
 
 impl Command {
     pub fn new(cfg: config::Config) -> Command {
-        return Command { cfg: cfg };
+        Command { cfg }
     }
 
     pub fn add_rules(&mut self, rules: &Vec<&str>) -> Result<()> {
-        return self.cfg.rules.add(rules);
+        self.cfg.rules.add(rules)
+    }
+
+    pub fn remove_rules(&mut self, rules: &Vec<&str>) -> Result<()> {
+        self.cfg.rules.remove(rules)
     }
 
     pub fn list(&self) {
@@ -45,11 +49,11 @@ fn to_humanreadable(size: u64) -> String {
     }
 
     let s = size / (exp.pow(i - 1));
-    return match i - 1 {
+    match i - 1 {
         1 => s.to_string() + "K",
         2 => s.to_string() + "M",
         3 => s.to_string() + "G",
         4 => s.to_string() + "T",
         _ => s.to_string(),
-    };
+    }
 }

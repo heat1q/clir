@@ -15,6 +15,11 @@ fn main() {
                 .about("adds a new rule")
                 .arg(Arg::new("pattern").multiple_values(true)),
         )
+        .subcommand(
+            App::new("remove")
+                .about("remove rules")
+                .arg(Arg::new("pattern").multiple_values(true)),
+        )
         .get_matches();
 
     let cfg = Config::new(".clir");
@@ -25,6 +30,11 @@ fn main() {
             let vals: Vec<&str> = p.values_of("pattern").unwrap().collect();
             println!("input: {:?}", vals);
             cmd.add_rules(&vals).unwrap();
+        }
+        Some(("remove", p)) => {
+            let vals: Vec<&str> = p.values_of("pattern").unwrap().collect();
+            println!("input: {:?}", vals);
+            cmd.remove_rules(&vals).unwrap();
         }
         _ => cmd.list(),
     }
