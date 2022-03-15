@@ -1,23 +1,25 @@
-use std::io::Result;
+use std::io;
+use std::path::Path;
 use std::string::String;
 
 use super::super::{config, fs};
 
-pub struct Command {
+pub struct Command<'a> {
     cfg: config::Config,
+    current_dir: &'a Path,
 }
 
-impl Command {
-    pub fn new(cfg: config::Config) -> Command {
-        Command { cfg }
+impl<'a> Command<'a> {
+    pub fn new(cfg: config::Config, current_dir: &'a Path) -> Command<'a> {
+        Command { cfg, current_dir }
     }
 
-    pub fn add_rules(&mut self, rules: &Vec<&str>) -> Result<()> {
-        self.cfg.rules.add(rules)
+    pub fn add_rules(&mut self, rules: Vec<&str>) -> io::Result<()> {
+        self.cfg.rules.add(self.get_paths(rules)?)
     }
 
-    pub fn remove_rules(&mut self, rules: &Vec<&str>) -> Result<()> {
-        self.cfg.rules.remove(rules)
+    pub fn remove_rules(&mut self, rules: Vec<&str>) -> io::Result<()> {
+        self.cfg.rules.remove(self.get_paths(rules)?)
     }
 
     pub fn list(&self) {
@@ -37,9 +39,22 @@ impl Command {
         println!("----");
         println!("{}\ttotal to remove", to_humanreadable(total));
     }
+
+    fn get_paths(&self, rules: Vec<&str>) -> io::Result<Vec<String>> {
+        let mut paths: Vec<String> = Vec::new();
+        for r in rules {
+            if let Some(path) = self.current_dir.join(r).canonicalize()?.to_str() {
+                paths.push(path.to_owned())
+            }
+        }
+        Ok(paths)
+    }
 }
 
 fn to_humanreadable(size: u64) -> String {
+    if size == 0 {
+        return "".to_owned();
+    }
     let exp: u64 = 1000;
     let mut i = 0;
     let mut res = size;

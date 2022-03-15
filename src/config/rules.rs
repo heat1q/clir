@@ -33,18 +33,18 @@ impl Rules {
         Ok(())
     }
 
-    pub fn add(&mut self, rules: &Vec<&str>) -> io::Result<()> {
+    pub fn add(&mut self, rules: Vec<String>) -> io::Result<()> {
         for r in rules {
-            self.pattern.insert(r.to_string());
+            self.pattern.insert(r);
         }
         println!("rules: {:?}", self.get());
         self.write()?;
         Ok(())
     }
 
-    pub fn remove(&mut self, rules: &Vec<&str>) -> io::Result<()> {
+    pub fn remove(&mut self, rules: Vec<String>) -> io::Result<()> {
         for r in rules {
-            self.pattern.remove(&r.to_string());
+            self.pattern.remove(&r);
         }
         self.write()?;
         Ok(())
