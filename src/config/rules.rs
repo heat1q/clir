@@ -12,13 +12,13 @@ pub struct Rules {
 }
 
 impl Rules {
-    pub fn new(file_path: &'static str) -> Rules {
+    pub fn new(file_path: &'static str) -> io::Result<Rules> {
         let mut rules = Rules {
             file_path,
             pattern: HashSet::new(),
         };
-        rules.load().expect("failed to load rules");
-        rules
+        rules.load()?;
+        Ok(rules)
     }
 
     pub fn load(&mut self) -> io::Result<()> {
