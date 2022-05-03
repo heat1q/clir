@@ -22,15 +22,19 @@ impl Rules {
     }
 
     pub fn load(&mut self) -> io::Result<()> {
-        let raw_content = fs::read(self.file_path)?;
-        let lines = String::from_utf8(raw_content)
-            .unwrap()
-            .split("\n")
-            .map(str::to_string)
-            .collect::<Vec<String>>();
+        if let Ok(file_content) = fs::read(self.file_path) {
+            let lines = String::from_utf8(file_content)
+                .unwrap()
+                .split("\n")
+                .map(str::to_string)
+                .collect::<Vec<String>>();
 
-        self.pattern = HashSet::from_iter(lines);
-        Ok(())
+            self.pattern = HashSet::from_iter(lines);
+            return Ok(());
+        }
+
+        // create empty rules file if not exist
+        fs::write(self.file_path, &[])
     }
 
     pub fn add(&mut self, rules: Vec<String>) -> io::Result<()> {
