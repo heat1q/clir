@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use super::rules::Rules;
+use crate::rules::Rules;
 
 pub struct Config {
     pub rules: Rules,

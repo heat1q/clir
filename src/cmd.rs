@@ -2,15 +2,16 @@ use std::io;
 use std::path::Path;
 use std::string::String;
 
-use super::super::{config, fs};
+use crate::config::Config;
+use crate::fs;
 
 pub struct Command<'a> {
-    cfg: config::Config,
+    cfg: Config,
     current_dir: &'a Path,
 }
 
 impl<'a> Command<'a> {
-    pub fn new(cfg: config::Config, current_dir: &'a Path) -> Command<'a> {
+    pub fn new(cfg: Config, current_dir: &'a Path) -> Command<'a> {
         Command { cfg, current_dir }
     }
 

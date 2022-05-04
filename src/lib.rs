@@ -1,11 +1,13 @@
 use clap::{App, Arg};
-use cmd::Command;
-use config::Config;
 use std::{env, error::Error};
+
+use crate::cmd::Command;
+use crate::config::Config;
 
 mod cmd;
 mod config;
 mod fs;
+mod rules;
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     let current_dir = env::current_dir()?;
