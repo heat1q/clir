@@ -3,7 +3,6 @@ use std::path::Path;
 use std::string::String;
 
 use crate::config::Config;
-use crate::fs;
 
 pub struct Command<'a> {
     cfg: Config,
@@ -16,35 +15,31 @@ impl<'a> Command<'a> {
     }
 
     pub fn add_rules(&mut self, rules: Vec<&str>) -> io::Result<()> {
-        self.cfg.rules.add(self.get_paths(rules)?)
+        self.cfg.rules.add(self.prefix_workdir(rules)?)
     }
 
     pub fn remove_rules(&mut self, rules: Vec<&str>) -> io::Result<()> {
-        self.cfg.rules.remove(self.get_paths(rules)?)
+        self.cfg.rules.remove(self.prefix_workdir(rules)?)
     }
 
     pub fn list(&self) {
-        let rules = self.cfg.rules.get();
+        let patterns = self.cfg.rules.get();
         let mut total: u64 = 0;
-        for r in rules {
-            let size = match fs::get_size(&r) {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-
-            total += size;
-
-            println!("{}\t{}", to_humanreadable(size), r);
+        for pattern in patterns {
+            if let Some(size) = pattern.get_size() {
+                total += size;
+                println!("{}\t{}", to_humanreadable(size), pattern);
+            }
         }
 
         println!("----");
         println!("{}\ttotal to remove", to_humanreadable(total));
     }
 
-    fn get_paths(&self, rules: Vec<&str>) -> io::Result<Vec<String>> {
+    fn prefix_workdir(&self, rules: Vec<&str>) -> io::Result<Vec<String>> {
         let mut paths: Vec<String> = Vec::new();
         for r in rules {
-            if let Some(path) = self.current_dir.join(r).canonicalize()?.to_str() {
+            if let Some(path) = self.current_dir.join(r).to_str() {
                 paths.push(path.to_owned())
             }
         }
