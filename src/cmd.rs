@@ -28,7 +28,13 @@ impl<'a> Command<'a> {
         for pattern in patterns {
             if let Some(size) = pattern.get_size() {
                 total += size;
-                println!("{}\t{}", to_humanreadable(size), pattern);
+                println!(
+                    "{}\t{} ({} files, {} dirs)",
+                    to_humanreadable(size),
+                    pattern,
+                    pattern.num_files(),
+                    pattern.num_dirs()
+                );
             }
         }
 

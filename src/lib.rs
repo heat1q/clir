@@ -6,7 +6,6 @@ use crate::config::Config;
 
 mod cmd;
 mod config;
-mod fs;
 mod rules;
 
 pub fn run() -> Result<(), Box<dyn Error>> {
