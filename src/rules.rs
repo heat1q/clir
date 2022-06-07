@@ -8,28 +8,32 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
 use std::vec::Vec;
 
-pub struct Rules {
-    file_path: &'static str,
+pub struct Rules<P> {
+    file_path: P,
     collection: HashSet<Pattern>,
 }
 
-impl Rules {
-    pub fn new(file_path: &'static str) -> io::Result<Rules> {
+impl<P> Rules<P>
+where
+    P: AsRef<Path>,
+{
+    pub fn new(file_path: P) -> io::Result<Rules<P>> {
         let mut rules = Rules {
             file_path,
             collection: HashSet::new(),
         };
         rules.load()?;
+
         Ok(rules)
     }
 
     fn load(&mut self) -> io::Result<()> {
-        if let Ok(file_content) = fs::read(self.file_path) {
+        if let Ok(file_content) = fs::read(&self.file_path) {
             if let Ok(lines) = String::from_utf8(file_content) {
                 let lines = lines.split("\n");
 
@@ -50,7 +54,7 @@ impl Rules {
             return Ok(());
         } else {
             // create empty rules file if not exist
-            fs::write(self.file_path, &[])
+            fs::write(&self.file_path, &[])
         }
     }
 
@@ -79,9 +83,9 @@ impl Rules {
     }
 
     pub fn write(&self) -> io::Result<()> {
-        fs::remove_file(self.file_path)?;
+        fs::remove_file(&self.file_path)?;
         let mut options = fs::OpenOptions::new();
-        let mut file: File = options.append(true).create(true).open(self.file_path)?;
+        let mut file: File = options.append(true).create(true).open(&self.file_path)?;
         for r in self.get() {
             file.write([r.to_string().as_str(), "\n"].concat().as_bytes())?;
         }

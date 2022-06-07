@@ -2,10 +2,9 @@ use clap::{App, Arg};
 use std::{env, error::Error};
 
 use crate::cmd::Command;
-use crate::config::Config;
+use crate::rules::Rules;
 
 mod cmd;
-mod config;
 mod rules;
 
 pub fn run() -> Result<(), Box<dyn Error>> {
@@ -25,8 +24,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         )
         .get_matches();
 
-    let cfg = Config::new(".clir")?;
-    let mut cmd = Command::new(cfg, current_dir.as_path());
+    let mut rules = Rules::new(".clir")?;
+    let mut cmd = Command::new(&mut rules, current_dir);
 
     match matches.subcommand() {
         Some(("add", p)) => {
