@@ -1,6 +1,7 @@
-use std::io;
 use std::path::Path;
 use std::string::String;
+
+use anyhow::Result;
 
 use crate::rules::Rules;
 
@@ -18,11 +19,11 @@ where
         Command { rules, current_dir }
     }
 
-    pub fn add_rules(&mut self, rules: Vec<&str>) -> io::Result<()> {
+    pub fn add_rules(&mut self, rules: Vec<&str>) -> Result<()> {
         self.rules.add(self.prefix_workdir(rules)?)
     }
 
-    pub fn remove_rules(&mut self, rules: Vec<&str>) -> io::Result<()> {
+    pub fn remove_rules(&mut self, rules: Vec<&str>) -> Result<()> {
         self.rules.remove(self.prefix_workdir(rules)?)
     }
 
@@ -46,7 +47,7 @@ where
         println!("{}\ttotal to remove", to_humanreadable(total));
     }
 
-    fn prefix_workdir(&self, rules: Vec<&str>) -> io::Result<Vec<String>> {
+    fn prefix_workdir(&self, rules: Vec<&str>) -> Result<Vec<String>> {
         let mut paths: Vec<String> = Vec::new();
         for r in rules {
             if let Some(path) = self.current_dir.as_ref().join(r).to_str() {

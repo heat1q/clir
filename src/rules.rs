@@ -1,13 +1,13 @@
+use anyhow::{Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
 use std::collections::HashSet;
 use std::convert::From;
-use std::error::Error;
 use std::fmt;
 use std::fs::{self, File};
-use std::io;
 use std::io::Write;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
@@ -22,7 +22,7 @@ impl<P> Rules<P>
 where
     P: AsRef<Path>,
 {
-    pub fn new(file_path: P) -> io::Result<Rules<P>> {
+    pub fn new(file_path: P) -> Result<Rules<P>> {
         let mut rules = Rules {
             file_path,
             collection: HashSet::new(),
@@ -32,7 +32,7 @@ where
         Ok(rules)
     }
 
-    fn load(&mut self) -> io::Result<()> {
+    fn load(&mut self) -> Result<()> {
         if let Ok(file_content) = fs::read(&self.file_path) {
             if let Ok(lines) = String::from_utf8(file_content) {
                 let lines = lines.split("\n");
@@ -48,17 +48,17 @@ where
                     }
                 }
             } else {
-                println!("cannot parse file content");
+                anyhow::bail!("failed to parse rules file content")
             }
 
             return Ok(());
         } else {
             // create empty rules file if not exist
-            fs::write(&self.file_path, &[])
+            fs::write(&self.file_path, &[]).context("failed to create rules file")
         }
     }
 
-    pub fn add(&mut self, patterns: Vec<String>) -> io::Result<()> {
+    pub fn add(&mut self, patterns: Vec<String>) -> Result<()> {
         for pattern in patterns {
             if let Ok(pattern) = Pattern::new(pattern) {
                 self.collection.insert(pattern);
@@ -71,7 +71,7 @@ where
         Ok(())
     }
 
-    pub fn remove(&mut self, patterns: Vec<String>) -> io::Result<()> {
+    pub fn remove(&mut self, patterns: Vec<String>) -> Result<()> {
         for pattern in patterns {
             self.collection
                 .remove(&Pattern::from_str(pattern.as_str()).unwrap());
@@ -82,7 +82,7 @@ where
         Ok(())
     }
 
-    pub fn write(&self) -> io::Result<()> {
+    pub fn write(&self) -> Result<()> {
         fs::remove_file(&self.file_path)?;
         let mut options = fs::OpenOptions::new();
         let mut file: File = options.append(true).create(true).open(&self.file_path)?;
@@ -117,7 +117,7 @@ impl Default for Pattern {
 }
 
 impl Pattern {
-    fn new(pattern: String) -> Result<Self, Box<dyn Error>> {
+    fn new(pattern: String) -> Result<Self> {
         let glob_paths = glob(&pattern)?;
 
         let mut num_files: u64 = 0;
@@ -214,5 +214,13 @@ impl FromStr for Pattern {
         let mut pattern = Pattern::default();
         pattern.pattern = String::from(s);
         Ok(pattern)
+    }
+}
+
+impl Deref for Pattern {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pattern
     }
 }

@@ -1,5 +1,6 @@
+use anyhow::Result;
 use clap::{App, Arg};
-use std::{env, error::Error};
+use std::env;
 
 use crate::cmd::Command;
 use crate::rules::Rules;
@@ -7,7 +8,7 @@ use crate::rules::Rules;
 mod cmd;
 mod rules;
 
-pub fn run() -> Result<(), Box<dyn Error>> {
+pub fn run() -> Result<()> {
     let current_dir = env::current_dir()?;
     println!("working dir: {}", current_dir.display());
     let matches = App::new("clir")
