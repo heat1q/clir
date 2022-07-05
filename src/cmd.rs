@@ -3,19 +3,20 @@ use std::string::String;
 
 use anyhow::Result;
 
+use crate::display::SizeUnit;
 use crate::rules::Rules;
 
-pub struct Command<'a, P, V> {
-    rules: &'a mut Rules<P>,
+pub struct Command<P, V> {
+    rules: Rules<P>,
     current_dir: V,
 }
 
-impl<'a, P, V> Command<'a, P, V>
+impl<P, V> Command<P, V>
 where
     P: AsRef<Path>,
     V: AsRef<Path>,
 {
-    pub fn new(rules: &'a mut Rules<P>, current_dir: V) -> Command<'a, P, V> {
+    pub fn new(rules: Rules<P>, current_dir: V) -> Command<P, V> {
         Command { rules, current_dir }
     }
 
@@ -35,7 +36,7 @@ where
                 total += size;
                 println!(
                     "{}\t{} ({} files, {} dirs)",
-                    to_humanreadable(size),
+                    SizeUnit::new(size),
                     pattern,
                     pattern.num_files(),
                     pattern.num_dirs()
@@ -44,7 +45,7 @@ where
         }
 
         println!("----");
-        println!("{}\ttotal to remove", to_humanreadable(total));
+        println!("{}\ttotal to remove", SizeUnit::new(total));
     }
 
     fn prefix_workdir(&self, rules: Vec<&str>) -> Result<Vec<String>> {
@@ -55,27 +56,5 @@ where
             }
         }
         Ok(paths)
-    }
-}
-
-fn to_humanreadable(size: u64) -> String {
-    if size == 0 {
-        return "".to_owned();
-    }
-    let exp: u64 = 1000;
-    let mut i = 0;
-    let mut res = size;
-    while res > 0 {
-        res /= exp;
-        i += 1;
-    }
-
-    let s = size / (exp.pow(i - 1));
-    match i - 1 {
-        1 => s.to_string() + "K",
-        2 => s.to_string() + "M",
-        3 => s.to_string() + "G",
-        4 => s.to_string() + "T",
-        _ => s.to_string(),
     }
 }

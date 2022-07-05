@@ -6,6 +6,7 @@ use crate::cmd::Command;
 use crate::rules::Rules;
 
 mod cmd;
+mod display;
 mod rules;
 
 pub fn run() -> Result<()> {
@@ -25,8 +26,8 @@ pub fn run() -> Result<()> {
         )
         .get_matches();
 
-    let mut rules = Rules::new(".clir")?;
-    let mut cmd = Command::new(&mut rules, current_dir);
+    let rules = Rules::new(".clir")?;
+    let mut cmd = Command::new(rules, current_dir);
 
     match matches.subcommand() {
         Some(("add", p)) => {
