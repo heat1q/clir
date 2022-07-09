@@ -6,17 +6,13 @@ use anyhow::Result;
 use crate::display::SizeUnit;
 use crate::rules::Rules;
 
-pub struct Command<P, V> {
-    rules: Rules<P>,
-    current_dir: V,
+pub struct Command<'a> {
+    rules: Rules<'a>,
+    current_dir: &'a Path,
 }
 
-impl<P, V> Command<P, V>
-where
-    P: AsRef<Path>,
-    V: AsRef<Path>,
-{
-    pub fn new(rules: Rules<P>, current_dir: V) -> Command<P, V> {
+impl<'a> Command<'a> {
+    pub fn new(rules: Rules<'a>, current_dir: &'a Path) -> Command<'a> {
         Command { rules, current_dir }
     }
 
@@ -51,7 +47,7 @@ where
     fn prefix_workdir(&self, rules: Vec<&str>) -> Result<Vec<String>> {
         let mut paths: Vec<String> = Vec::new();
         for r in rules {
-            if let Some(path) = self.current_dir.as_ref().join(r).to_str() {
+            if let Some(path) = self.current_dir.join(r).to_str() {
                 paths.push(path.to_owned())
             }
         }

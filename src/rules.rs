@@ -13,16 +13,13 @@ use std::str::FromStr;
 use std::string::{ParseError, String};
 use std::vec::Vec;
 
-pub struct Rules<P> {
-    file_path: P,
+pub struct Rules<'a> {
+    file_path: &'a Path,
     collection: HashSet<Pattern>,
 }
 
-impl<P> Rules<P>
-where
-    P: AsRef<Path>,
-{
-    pub fn new(file_path: P) -> Result<Rules<P>> {
+impl<'a> Rules<'a> {
+    pub fn new(file_path: &'a Path) -> Result<Rules<'a>> {
         let mut rules = Rules {
             file_path,
             collection: HashSet::new(),
