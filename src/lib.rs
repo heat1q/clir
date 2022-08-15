@@ -39,18 +39,16 @@ pub fn run() -> Result<()> {
 fn parse_args(app: &mut App, mut cmd: Command) -> Result<()> {
     match app.get_matches_mut().subcommand() {
         Some(("add", p)) => {
-            let rules: Vec<&str> = p
+            let rules: Vec<&String> = p
                 .get_many("pattern")
-                .ok_or(anyhow!("invalid patterns for `add`"))?
-                .copied()
+                .ok_or_else(|| anyhow!("invalid patterns for `add`"))?
                 .collect();
             cmd.add_rules(rules)?;
         }
         Some(("remove", p)) => {
-            let rules: Vec<&str> = p
+            let rules: Vec<&String> = p
                 .get_many("pattern")
-                .ok_or(anyhow!("invalid patterns for `remove`"))?
-                .copied()
+                .ok_or_else(|| anyhow!("invalid patterns for `remove`"))?
                 .collect();
             cmd.remove_rules(rules)?;
         }

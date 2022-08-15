@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::convert::From;
 use std::fmt;
@@ -98,6 +99,7 @@ impl<'a> Rules<'a> {
 pub struct Pattern {
     pattern: String,
     paths: Option<Vec<PathBuf>>,
+    size: RefCell<Option<u64>>,
     num_files: u64,
     num_dirs: u64,
 }
@@ -107,6 +109,7 @@ impl Default for Pattern {
         Pattern {
             pattern: "".to_owned(),
             paths: None,
+            size: RefCell::new(None),
             num_files: 0,
             num_dirs: 0,
         }
@@ -119,40 +122,55 @@ impl Pattern {
 
         let mut num_files: u64 = 0;
         let mut num_dirs: u64 = 0;
-        let mut paths: Vec<PathBuf> = Vec::new();
-        for path in glob_paths {
-            if let Ok(path) = path {
+        let paths: Vec<PathBuf> = glob_paths
+            .flatten()
+            .map(|path| {
                 if path.is_file() {
                     num_files += 1;
                 } else if path.is_dir() {
                     num_dirs += 1;
                 }
+                path
+            })
+            .collect();
+        //for path in glob_paths {
+        //    if let Ok(path) = path {
+        //        if path.is_file() {
+        //            num_files += 1;
+        //        } else if path.is_dir() {
+        //            num_dirs += 1;
+        //        }
 
-                paths.push(path);
-            }
-        }
+        //        paths.push(path);
+        //    }
+        //}
 
         Ok(Pattern {
             pattern,
             paths: Some(paths),
+            size: RefCell::new(None),
             num_files,
             num_dirs,
         })
     }
 
     pub fn get_size(&self) -> Option<u64> {
+        if self.size.borrow().is_some() {
+            return *self.size.borrow();
+        }
+
         let paths = self.paths.as_ref()?;
 
         let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
 
         let mut size: u64 = 0;
         for path in paths {
-            size += match self.get_path_size(path.to_path_buf(), &mut visited) {
-                Some(sz) => sz,
-                None => 0,
-            }
+            size += self
+                .get_path_size(path.to_path_buf(), &mut visited)
+                .unwrap_or(0);
         }
 
+        self.size.replace(Some(size));
         Some(size)
     }
 
