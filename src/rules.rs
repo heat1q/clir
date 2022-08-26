@@ -33,11 +33,9 @@ impl<'a> Rules<'a> {
     fn load(&mut self) -> Result<()> {
         if let Ok(file_content) = fs::read(&self.file_path) {
             if let Ok(lines) = String::from_utf8(file_content) {
-                let lines = lines.split("\n");
-
-                for line in lines {
+                for line in lines.split('\n') {
                     // ignore emtpy lines
-                    if line == "" {
+                    if line.is_empty() {
                         continue;
                     }
 
@@ -49,7 +47,7 @@ impl<'a> Rules<'a> {
                 anyhow::bail!("failed to parse rules file content")
             }
 
-            return Ok(());
+            Ok(())
         } else {
             // create empty rules file if not exist
             fs::write(&self.file_path, &[]).context("failed to create rules file")
@@ -192,10 +190,7 @@ impl Pattern {
         for entry in fs::read_dir(&path).ok()? {
             let path = entry.ok()?.path();
 
-            size += match self.get_path_size(path, visited) {
-                Some(sz) => sz,
-                None => 0,
-            }
+            size += self.get_path_size(path, visited).unwrap_or(0);
         }
 
         Some(size)

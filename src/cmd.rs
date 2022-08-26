@@ -8,12 +8,12 @@ use crate::rules::Rules;
 
 pub struct Command<'a> {
     rules: Rules<'a>,
-    current_dir: &'a Path,
+    workdir: &'a Path,
 }
 
 impl<'a> Command<'a> {
-    pub fn new(rules: Rules<'a>, current_dir: &'a Path) -> Command<'a> {
-        Command { rules, current_dir }
+    pub fn new(rules: Rules<'a>, workdir: &'a Path) -> Command<'a> {
+        Command { rules, workdir }
     }
 
     pub fn add_rules(&mut self, rules: Vec<&String>) -> Result<()> {
@@ -28,7 +28,7 @@ impl<'a> Command<'a> {
         let patterns = self.rules.get();
         let total: u64 = patterns.iter().map(|p| p.get_size().unwrap_or(0)).sum();
 
-        display::format_patterns(patterns);
+        display::format_patterns(self.workdir, patterns);
 
         println!("----");
         println!("{}\ttotal to remove", SizeUnit::new(total));
@@ -37,7 +37,7 @@ impl<'a> Command<'a> {
     fn prefix_workdir(&self, rules: Vec<&String>) -> Result<Vec<String>> {
         let mut paths: Vec<String> = Vec::new();
         for r in rules {
-            if let Some(path) = self.current_dir.join(r).to_str() {
+            if let Some(path) = self.workdir.join(r).to_str() {
                 paths.push(path.to_owned())
             }
         }
