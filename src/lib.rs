@@ -9,20 +9,33 @@ mod display;
 mod rules;
 
 pub fn run() -> Result<()> {
+    #[cfg(feature = "env_logger")]
+    env_logger::init();
+
     let current_dir = env::current_dir()?;
-    println!("working dir: {}", current_dir.display());
+    log::info!("working dir: {}", current_dir.display());
 
     let mut app = App::new("clir")
-        .about("Does awesome things")
+        .about("A command line cleaning utility.")
         .subcommand(
             App::new("add")
-                .about("adds new rules")
-                .arg(Arg::new("pattern").multiple_values(true)),
+                .about("Add new path(s) or glob pattern(s)")
+                .arg(
+                Arg::new("pattern")
+                    .help(
+                        "One or more paths or patterns. Paths can either be relative or absolute.",
+                    )
+                    .multiple_values(true),
+            ),
         )
         .subcommand(
-            App::new("remove")
-                .about("remove rules")
-                .arg(Arg::new("pattern").multiple_values(true)),
+            App::new("remove").about("Remove paths or patterns").arg(
+                Arg::new("pattern")
+                    .help(
+                        "One or more paths or patterns. Paths can either be relative or absolute.",
+                    )
+                    .multiple_values(true),
+            ),
         );
 
     let rules = Rules::new(".clir".as_ref())?;
