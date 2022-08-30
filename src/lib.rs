@@ -36,6 +36,12 @@ pub fn run() -> Result<()> {
                     )
                     .multiple_values(true),
             ),
+        )
+        .arg(
+            Arg::new("run")
+                .help("Recursively clean all defined patterns")
+                .short('r')
+                .action(clap::ArgAction::SetTrue),
         );
 
     let rules = Rules::new(".clir".as_ref())?;
@@ -50,7 +56,13 @@ pub fn run() -> Result<()> {
 }
 
 fn parse_args(app: &mut App, mut cmd: Command) -> Result<()> {
-    match app.get_matches_mut().subcommand() {
+    let app = app.get_matches_mut();
+    if *app.get_one::<bool>("run").unwrap() {
+        log::info!("run clean");
+        return cmd.clean();
+    }
+
+    match app.subcommand() {
         Some(("add", p)) => {
             let rules: Vec<&String> = p
                 .get_many("pattern")

@@ -83,13 +83,23 @@ impl<'a> Rules<'a> {
         let mut options = fs::OpenOptions::new();
         let mut file: File = options.append(true).create(true).open(&self.file_path)?;
         for r in self.get() {
-            file.write([r.to_string().as_str(), "\n"].concat().as_bytes())?;
+            let _n = file.write([r.to_string().as_str(), "\n"].concat().as_bytes())?;
         }
+
         Ok(())
     }
 
     pub fn get(&self) -> Vec<&Pattern> {
         self.collection.iter().collect()
+    }
+
+    pub fn clean(&self) -> Result<()> {
+        self.collection.iter().for_each(|pattern| {
+            // TODO - error handling
+            let _res = pattern.clean();
+        });
+
+        Ok(())
     }
 }
 
@@ -131,17 +141,6 @@ impl Pattern {
                 path
             })
             .collect();
-        //for path in glob_paths {
-        //    if let Ok(path) = path {
-        //        if path.is_file() {
-        //            num_files += 1;
-        //        } else if path.is_dir() {
-        //            num_dirs += 1;
-        //        }
-
-        //        paths.push(path);
-        //    }
-        //}
 
         Ok(Pattern {
             pattern,
@@ -158,7 +157,6 @@ impl Pattern {
         }
 
         let paths = self.paths.as_ref()?;
-
         let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
 
         let mut size: u64 = 0;
@@ -186,7 +184,6 @@ impl Pattern {
         }
 
         let mut size: u64 = 0;
-
         for entry in fs::read_dir(&path).ok()? {
             let path = entry.ok()?.path();
 
@@ -202,6 +199,30 @@ impl Pattern {
 
     pub fn num_dirs(&self) -> u64 {
         self.num_dirs
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.num_files + self.num_dirs == 0
+    }
+
+    pub fn clean(&self) -> Result<()> {
+        for path in self.paths.as_ref().unwrap() {
+            if path.is_dir() {
+                if let Err(err) = fs::remove_dir_all(path) {
+                    log::warn!("failed to removed {:?}: {err}", path);
+                }
+                log::info!("removed dir {:?}", path);
+                continue;
+            }
+            if let Err(err) = fs::remove_file(path) {
+                log::warn!("failed to removed file {:?}: {err}", path);
+            }
+            log::info!("removed file {:?}", path);
+        }
+
+        log::info!("cleaned pattern {self}");
+
+        Ok(())
     }
 }
 
@@ -221,8 +242,10 @@ impl FromStr for Pattern {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut pattern = Pattern::default();
-        pattern.pattern = String::from(s);
+        let pattern = Pattern {
+            pattern: String::from(s),
+            ..Pattern::default()
+        };
         Ok(pattern)
     }
 }

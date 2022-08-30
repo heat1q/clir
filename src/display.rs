@@ -3,21 +3,37 @@ use std::{fmt::Display, path::Path};
 use crate::rules::Pattern;
 
 pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
-    // sort patterns by size
-    let mut patterns_sorted: Vec<&Pattern> = patterns.into_iter().collect();
+    // sort patterns by size and remove empty ones
+    let mut patterns_sorted: Vec<&Pattern> =
+        patterns.into_iter().filter(|p| !p.is_empty()).collect();
     patterns_sorted.sort_by_cached_key(|k| k.get_size());
 
-    for pattern in patterns_sorted {
-        if let Some(size) = pattern.get_size() {
-            println!(
-                "{}\t{} ({} files, {} dirs)",
-                SizeUnit::new(size),
-                format_relative_path(workdir, pattern),
-                pattern.num_files(),
-                pattern.num_dirs()
-            );
-        }
+    if patterns_sorted.is_empty() {
+        println!("There is nothing to do :)");
+        return;
     }
+
+    let total_size = patterns_sorted
+        .iter()
+        .map(|pattern| {
+            if let Some(size) = pattern.get_size() {
+                println!(
+                    "{}\t{} ({} files, {} dirs)",
+                    SizeUnit::new(size),
+                    format_relative_path(workdir, pattern),
+                    pattern.num_files(),
+                    pattern.num_dirs()
+                );
+
+                size
+            } else {
+                0
+            }
+        })
+        .sum();
+
+    println!("----");
+    println!("{}\ttotal to remove", SizeUnit::new(total_size));
 }
 
 fn format_relative_path(workdir: &Path, pattern: &Pattern) -> String {

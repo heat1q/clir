@@ -3,7 +3,7 @@ use std::string::String;
 
 use anyhow::Result;
 
-use crate::display::{self, SizeUnit};
+use crate::display;
 use crate::rules::Rules;
 
 pub struct Command<'a> {
@@ -25,13 +25,11 @@ impl<'a> Command<'a> {
     }
 
     pub fn list(&self) {
-        let patterns = self.rules.get();
-        let total: u64 = patterns.iter().map(|p| p.get_size().unwrap_or(0)).sum();
+        display::format_patterns(self.workdir, self.rules.get());
+    }
 
-        display::format_patterns(self.workdir, patterns);
-
-        println!("----");
-        println!("{}\ttotal to remove", SizeUnit::new(total));
+    pub fn clean(&self) -> Result<()> {
+        self.rules.clean()
     }
 
     fn prefix_workdir(&self, rules: Vec<&String>) -> Result<Vec<String>> {
