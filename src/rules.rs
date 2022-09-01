@@ -61,7 +61,7 @@ impl<'a> Rules<'a> {
             }
         }
 
-        println!("rules: {:?}", self.get());
+        log::info!("rules: {:?}", self.get());
         self.write()?;
 
         Ok(())

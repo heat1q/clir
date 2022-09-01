@@ -1,7 +1,8 @@
+use std::io::{stdin, stdout, Write};
 use std::path::Path;
 use std::string::String;
 
-use anyhow::Result;
+use anyhow::{Ok, Result};
 
 use crate::display;
 use crate::rules::Rules;
@@ -29,7 +30,17 @@ impl<'a> Command<'a> {
     }
 
     pub fn clean(&self) -> Result<()> {
-        self.rules.clean()
+        self.list();
+        let mut confirm = "".to_owned();
+        print!("Clean all selected paths? [(Y)es/(N)o]: ");
+        stdout().lock().flush()?;
+        stdin().read_line(&mut confirm)?;
+        if confirm == "y" || confirm == "Y" {
+            self.rules.clean()
+        } else {
+            println!("Aborting...");
+            Ok(())
+        }
     }
 
     fn prefix_workdir(&self, rules: Vec<&String>) -> Result<Vec<String>> {

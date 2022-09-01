@@ -1,39 +1,74 @@
-use std::{fmt::Display, path::Path};
-
 use crate::rules::Pattern;
+use anyhow::{Ok, Result};
+use io::Write;
+use std::{fmt::Display, io, path::Path};
 
 pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
+    let mut stdout = io::stdout();
+
     // sort patterns by size and remove empty ones
     let mut patterns_sorted: Vec<&Pattern> =
         patterns.into_iter().filter(|p| !p.is_empty()).collect();
     patterns_sorted.sort_by_cached_key(|k| k.get_size());
+    let total_size: u64 = patterns_sorted
+        .iter()
+        .map(|p| p.get_size().unwrap_or(0))
+        .sum();
 
     if patterns_sorted.is_empty() {
-        println!("There is nothing to do :)");
+        write_boxed(&mut stdout, "There is nothing to do :)").unwrap();
         return;
     }
 
-    let total_size = patterns_sorted
+    patterns_sorted
         .iter()
-        .map(|pattern| {
-            if let Some(size) = pattern.get_size() {
-                println!(
-                    "{}\t{} ({} files, {} dirs)",
-                    SizeUnit::new(size),
-                    format_relative_path(workdir, pattern),
-                    pattern.num_files(),
-                    pattern.num_dirs()
-                );
+        .for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size).unwrap());
 
-                size
-            } else {
-                0
-            }
-        })
-        .sum();
+    let num_files: u64 = patterns_sorted.iter().map(|p| p.num_files()).sum();
+    let num_dirs: u64 = patterns_sorted.iter().map(|p| p.num_dirs()).sum();
 
-    println!("----");
-    println!("{}\ttotal to remove", SizeUnit::new(total_size));
+    let mut summary = String::with_capacity(2 << 7);
+    summary.push_str(&format!("[||||||||] {} \t", SizeUnit::new(total_size)));
+    summary.push_str(&match (num_files, num_dirs) {
+        (0, _) => format!("{num_dirs}  directory(ies) to be freed"),
+        (_, 0) => format!("{num_files}  file(s) to be freed"),
+        (_, _) => format!("{num_files}  file(s) and {num_dirs}  directory(ies) to be freed"),
+    });
+
+    write_boxed(&mut stdout, &summary).unwrap();
+    stdout.flush().unwrap();
+}
+
+fn write_pattern(
+    mut w: impl Write,
+    workdir: &Path,
+    pattern: &Pattern,
+    total_size: u64,
+) -> Result<()> {
+    const SCALE: i32 = 8;
+    let mut quota =
+        (pattern.get_size().unwrap_or(0) as f64 / total_size as f64 * SCALE as f64) as i32;
+    quota += 1;
+    let used = "|".repeat(quota as usize);
+    let free = " ".repeat((SCALE - quota) as usize);
+    writeln!(
+        w,
+        "  [{used}{free}] {} \t{} ({} , {} )",
+        SizeUnit::new(pattern.get_size().unwrap_or(0)),
+        format_relative_path(workdir, pattern),
+        pattern.num_files(),
+        pattern.num_dirs(),
+    )?;
+    Ok(())
+}
+
+fn write_boxed<W: Write>(w: &'_ mut W, text: &str) -> Result<()> {
+    let width = text.len() + 2;
+    let horizontal = "━".repeat(width);
+    writeln!(w, "┏{horizontal}┓")?;
+    writeln!(w, "┃ {text} ┃")?;
+    writeln!(w, "┗{horizontal}┛")?;
+    Ok(())
 }
 
 fn format_relative_path(workdir: &Path, pattern: &Pattern) -> String {
