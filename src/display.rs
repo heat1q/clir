@@ -28,11 +28,11 @@ pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
     let num_dirs: u64 = patterns_sorted.iter().map(|p| p.num_dirs()).sum();
 
     let mut summary = String::with_capacity(2 << 7);
-    summary.push_str(&format!("[||||||||] {} \t", SizeUnit::new(total_size)));
+    summary.push_str(&format!("[||||||||]  {}    ", SizeUnit::new(total_size)));
     summary.push_str(&match (num_files, num_dirs) {
-        (0, _) => format!("{num_dirs}  directory(ies) to be freed"),
-        (_, 0) => format!("{num_files}  file(s) to be freed"),
-        (_, _) => format!("{num_files}  file(s) and {num_dirs}  directory(ies) to be freed"),
+        (0, _) => format!("{num_dirs} directory(ies) to be freed"),
+        (_, 0) => format!("{num_files} file(s) to be freed"),
+        (_, _) => format!("{num_files} file(s) and {num_dirs} directory(ies) to be freed"),
     });
 
     write_boxed(&mut stdout, &summary).unwrap();
@@ -53,7 +53,7 @@ fn write_pattern(
     let free = " ".repeat((SCALE - quota) as usize);
     writeln!(
         w,
-        "  [{used}{free}] {} \t{} ({} , {} )",
+        "  [{used}{free}]  {}    {} ({} , {} )",
         SizeUnit::new(pattern.get_size().unwrap_or(0)),
         format_relative_path(workdir, pattern),
         pattern.num_files(),
@@ -63,7 +63,7 @@ fn write_pattern(
 }
 
 fn write_boxed<W: Write>(w: &'_ mut W, text: &str) -> Result<()> {
-    let width = text.len() + 2;
+    let width = text.len() + 1;
     let horizontal = "━".repeat(width);
     writeln!(w, "┏{horizontal}┓")?;
     writeln!(w, "┃ {text} ┃")?;

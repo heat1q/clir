@@ -2,7 +2,7 @@ use crate::cmd::Command;
 use crate::rules::Rules;
 use anyhow::{anyhow, Ok, Result};
 use clap::{App, Arg};
-use std::env;
+use std::{env, path::Path};
 
 mod cmd;
 mod display;
@@ -38,16 +38,19 @@ pub fn run() -> Result<()> {
             ),
         )
         .arg(
+            Arg::new("verbose")
+                .help("Run in verbose mode")
+                .short('v')
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("run")
                 .help("Recursively clean all defined patterns")
                 .short('r')
                 .action(clap::ArgAction::SetTrue),
         );
 
-    let rules = Rules::new(".clir".as_ref())?;
-    let cmd = Command::new(rules, &current_dir);
-
-    if let Err(err) = parse_args(&mut app, cmd) {
+    if let Err(err) = parse_args(&mut app, &current_dir) {
         app.print_help()?;
         return Err(err);
     }
@@ -55,8 +58,13 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn parse_args(app: &mut App, mut cmd: Command) -> Result<()> {
+fn parse_args(app: &mut App, path: &Path) -> Result<()> {
     let app = app.get_matches_mut();
+    let verbose_mode = *app.get_one::<bool>("verbose").unwrap_or(&false);
+
+    let rules = Rules::new(".clir".as_ref())?;
+    let mut cmd = Command::new(rules, path, verbose_mode);
+
     if *app.get_one::<bool>("run").unwrap() {
         log::info!("run clean");
         return cmd.clean();

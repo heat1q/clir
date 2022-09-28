@@ -1,6 +1,7 @@
 use std::io::{stdin, stdout, Write};
 use std::path::Path;
 use std::string::String;
+use std::time;
 
 use anyhow::{Ok, Result};
 
@@ -10,11 +11,16 @@ use crate::rules::Rules;
 pub struct Command<'a> {
     rules: Rules<'a>,
     workdir: &'a Path,
+    verbose_mode: bool,
 }
 
 impl<'a> Command<'a> {
-    pub fn new(rules: Rules<'a>, workdir: &'a Path) -> Command<'a> {
-        Command { rules, workdir }
+    pub fn new(rules: Rules<'a>, workdir: &'a Path, verbose_mode: bool) -> Command<'a> {
+        Command {
+            rules,
+            workdir,
+            verbose_mode,
+        }
     }
 
     pub fn add_rules(&mut self, rules: Vec<&String>) -> Result<()> {
@@ -31,16 +37,22 @@ impl<'a> Command<'a> {
 
     pub fn clean(&self) -> Result<()> {
         self.list();
-        let mut confirm = "".to_owned();
-        print!("Clean all selected paths? [(Y)es/(N)o]: ");
+        print!("\nClean all selected paths? [(Y)es/(N)o]: ");
         stdout().lock().flush()?;
+
+        let mut confirm = "".to_owned();
         stdin().read_line(&mut confirm)?;
-        if confirm == "y" || confirm == "Y" {
-            self.rules.clean()
+
+        if confirm.starts_with('y') || confirm.starts_with('Y') {
+            let start = time::Instant::now();
+            self.rules.clean(self.verbose_mode)?;
+            let elapsed = start.elapsed().as_millis();
+            println!("Finished in {:.2}s", (elapsed as f64) / 1000.);
         } else {
             println!("Aborting...");
-            Ok(())
         }
+
+        Ok(())
     }
 
     fn prefix_workdir(&self, rules: Vec<&String>) -> Result<Vec<String>> {

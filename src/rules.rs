@@ -93,10 +93,10 @@ impl<'a> Rules<'a> {
         self.collection.iter().collect()
     }
 
-    pub fn clean(&self) -> Result<()> {
+    pub fn clean(&self, verbose_mode: bool) -> Result<()> {
         self.collection.iter().for_each(|pattern| {
             // TODO - error handling
-            let _res = pattern.clean();
+            let _res = pattern.clean(verbose_mode);
         });
 
         Ok(())
@@ -205,7 +205,7 @@ impl Pattern {
         self.num_files + self.num_dirs == 0
     }
 
-    pub fn clean(&self) -> Result<()> {
+    pub fn clean(&self, verbose_mode: bool) -> Result<()> {
         for path in self.paths.as_ref().unwrap() {
             if path.is_dir() {
                 if let Err(err) = fs::remove_dir_all(path) {
@@ -217,7 +217,10 @@ impl Pattern {
             if let Err(err) = fs::remove_file(path) {
                 log::warn!("failed to removed file {:?}: {err}", path);
             }
-            log::info!("removed file {:?}", path);
+
+            if verbose_mode {
+                println!("deleted {}", path.to_str().unwrap_or(""));
+            }
         }
 
         log::info!("cleaned pattern {self}");
