@@ -1,31 +1,33 @@
 use crate::rules::Pattern;
 use anyhow::{Ok, Result};
 use io::Write;
+use rayon::prelude::*;
 use std::{fmt::Display, io, path::Path};
 
 pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
     let mut stdout = io::stdout();
 
-    // sort patterns by size and remove empty ones
-    let mut patterns_sorted: Vec<&Pattern> =
-        patterns.into_iter().filter(|p| !p.is_empty()).collect();
-    patterns_sorted.sort_by_cached_key(|k| k.get_size());
-    let total_size: u64 = patterns_sorted
-        .iter()
-        .map(|p| p.get_size().unwrap_or(0))
+    let total_size: u64 = patterns
+        .par_iter()
+        .map(|pattern| pattern.get_size().unwrap_or(0))
         .sum();
 
-    if patterns_sorted.is_empty() {
+    if total_size == 0 {
         write_boxed(&mut stdout, "There is nothing to do :)").unwrap();
         return;
     }
 
-    patterns_sorted
+    let mut patterns: Vec<&Pattern> = patterns
+        .into_iter()
+        .filter(|pattern| !pattern.is_empty())
+        .collect();
+    patterns.par_sort_by_cached_key(|k| k.get_size());
+    patterns
         .iter()
         .for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size).unwrap());
 
-    let num_files: u64 = patterns_sorted.iter().map(|p| p.num_files()).sum();
-    let num_dirs: u64 = patterns_sorted.iter().map(|p| p.num_dirs()).sum();
+    let num_files: u64 = patterns.par_iter().map(|p| p.num_files()).sum();
+    let num_dirs: u64 = patterns.par_iter().map(|p| p.num_dirs()).sum();
 
     let mut summary = String::with_capacity(2 << 7);
     summary.push_str(&format!("[||||||||]  {}    ", SizeUnit::new(total_size)));

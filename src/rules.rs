@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
-use std::cell::RefCell;
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::convert::From;
 use std::fmt;
@@ -12,6 +12,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
+use std::sync::{Mutex, RwLock};
 use std::vec::Vec;
 
 pub struct Rules<'a> {
@@ -103,11 +104,11 @@ impl<'a> Rules<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Pattern {
     pattern: String,
     paths: Option<Vec<PathBuf>>,
-    size: RefCell<Option<u64>>,
+    size: Mutex<Option<u64>>,
     num_files: u64,
     num_dirs: u64,
 }
@@ -117,12 +118,20 @@ impl Default for Pattern {
         Pattern {
             pattern: "".to_owned(),
             paths: None,
-            size: RefCell::new(None),
+            size: Mutex::new(None),
             num_files: 0,
             num_dirs: 0,
         }
     }
 }
+
+impl PartialEq for Pattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.pattern == other.pattern
+    }
+}
+
+impl Eq for Pattern {}
 
 impl Pattern {
     fn new(pattern: String) -> Result<Self> {
@@ -145,51 +154,27 @@ impl Pattern {
         Ok(Pattern {
             pattern,
             paths: Some(paths),
-            size: RefCell::new(None),
+            size: Mutex::new(None),
             num_files,
             num_dirs,
         })
     }
 
     pub fn get_size(&self) -> Option<u64> {
-        if self.size.borrow().is_some() {
-            return *self.size.borrow();
+        if self.size.lock().unwrap().is_some() {
+            return *self.size.lock().unwrap();
         }
 
         let paths = self.paths.as_ref()?;
-        let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
+        let visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
+        let visited = RwLock::new(visited);
 
-        let mut size: u64 = 0;
-        for path in paths {
-            size += self
-                .get_path_size(path.to_path_buf(), &mut visited)
-                .unwrap_or(0);
-        }
+        let size = paths
+            .par_iter()
+            .map(|path| get_path_size(path.to_path_buf(), &visited).unwrap_or(0))
+            .sum();
 
-        self.size.replace(Some(size));
-        Some(size)
-    }
-
-    fn get_path_size(&self, path: PathBuf, visited: &mut HashSet<PathBuf>) -> Option<u64> {
-        // don't get the size for already visited paths
-        if visited.contains(&path) {
-            return None;
-        }
-
-        if !path.is_dir() {
-            let size = path.metadata().ok()?.len();
-            visited.insert(path);
-
-            return Some(size);
-        }
-
-        let mut size: u64 = 0;
-        for entry in fs::read_dir(&path).ok()? {
-            let path = entry.ok()?.path();
-
-            size += self.get_path_size(path, visited).unwrap_or(0);
-        }
-
+        let _ = self.size.lock().unwrap().insert(size);
         Some(size)
     }
 
@@ -259,4 +244,27 @@ impl Deref for Pattern {
     fn deref(&self) -> &Self::Target {
         &self.pattern
     }
+}
+
+fn get_path_size(path: PathBuf, visited: &RwLock<HashSet<PathBuf>>) -> Option<u64> {
+    // don't get the size for already visited paths
+    if visited.read().unwrap().contains(&path) {
+        return None;
+    }
+
+    if !path.is_dir() {
+        let size = path.metadata().ok()?.len();
+        visited.write().unwrap().insert(path);
+
+        return Some(size);
+    }
+
+    let size: u64 = fs::read_dir(&path)
+        .ok()?
+        .par_bridge()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| get_path_size(entry.path(), visited).unwrap_or(0))
+        .sum();
+
+    Some(size)
 }
