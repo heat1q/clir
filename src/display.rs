@@ -2,7 +2,7 @@ use crate::rules::Pattern;
 use anyhow::{Ok, Result};
 use io::Write;
 use rayon::prelude::*;
-use std::{fmt::Display, io, path::Path};
+use std::{convert::TryInto, fmt::Display, io, path::Path};
 
 pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
     let mut stdout = io::stdout();
@@ -50,9 +50,9 @@ fn write_pattern(
     const SCALE: i32 = 8;
     let mut quota =
         (pattern.get_size().unwrap_or(0) as f64 / total_size as f64 * SCALE as f64) as i32;
-    quota += 1;
-    let used = "|".repeat(quota as usize);
-    let free = " ".repeat((SCALE - quota) as usize);
+    quota = std::cmp::min(SCALE, quota + 1);
+    let used = "|".repeat(quota.try_into().unwrap_or(0));
+    let free = " ".repeat((SCALE - quota).try_into().unwrap_or(0));
     writeln!(
         w,
         "  [{used}{free}]  {}    {} ({} , {} )",
@@ -65,7 +65,7 @@ fn write_pattern(
 }
 
 fn write_boxed<W: Write>(w: &'_ mut W, text: &str) -> Result<()> {
-    let width = text.len() + 1;
+    let width = text.len() + 2;
     let horizontal = "━".repeat(width);
     writeln!(w, "┏{horizontal}┓")?;
     writeln!(w, "┃ {text} ┃")?;

@@ -2,8 +2,7 @@ use anyhow::{Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
-use rayon::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashSet, LinkedList};
 use std::convert::From;
 use std::fmt;
 use std::fs::{self, File};
@@ -12,7 +11,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
-use std::sync::{Mutex, RwLock};
+use std::sync::Mutex;
 use std::vec::Vec;
 
 pub struct Rules<'a> {
@@ -166,13 +165,7 @@ impl Pattern {
         }
 
         let paths = self.paths.as_ref()?;
-        let visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
-        let visited = RwLock::new(visited);
-
-        let size = paths
-            .par_iter()
-            .map(|path| get_path_size(path.to_path_buf(), &visited).unwrap_or(0))
-            .sum();
+        let size = get_paths_size(paths);
 
         let _ = self.size.lock().unwrap().insert(size);
         Some(size)
@@ -246,25 +239,37 @@ impl Deref for Pattern {
     }
 }
 
-fn get_path_size(path: PathBuf, visited: &RwLock<HashSet<PathBuf>>) -> Option<u64> {
-    // don't get the size for already visited paths
-    if visited.read().unwrap().contains(&path) {
-        return None;
+fn get_paths_size(paths: &Vec<PathBuf>) -> u64 {
+    let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
+
+    let mut buf: LinkedList<PathBuf> = LinkedList::new();
+    paths
+        .iter()
+        .for_each(|path| buf.push_back(path.to_path_buf()));
+
+    let mut size: u64 = 0;
+    while !buf.is_empty() {
+        let current_path = buf.pop_front().unwrap();
+
+        // don't get the size for already visited paths
+        if visited.contains(&current_path) {
+            continue;
+        }
+
+        if current_path.is_file() {
+            if let Ok(meta) = current_path.metadata() {
+                size += meta.len();
+            }
+            visited.insert(current_path);
+            continue;
+        }
+
+        if let Ok(current_dir) = fs::read_dir(&current_path) {
+            current_dir
+                .filter_map(|entry| entry.ok())
+                .for_each(|path| buf.push_back(path.path()));
+        }
     }
 
-    if !path.is_dir() {
-        let size = path.metadata().ok()?.len();
-        visited.write().unwrap().insert(path);
-
-        return Some(size);
-    }
-
-    let size: u64 = fs::read_dir(&path)
-        .ok()?
-        .par_bridge()
-        .filter_map(|entry| entry.ok())
-        .map(|entry| get_path_size(entry.path(), visited).unwrap_or(0))
-        .sum();
-
-    Some(size)
+    size
 }
