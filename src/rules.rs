@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
+use rayon::prelude::*;
 use std::collections::{HashSet, LinkedList};
 use std::convert::From;
 use std::fmt;
@@ -150,6 +151,8 @@ impl Pattern {
             })
             .collect();
 
+        log::debug!("pattern {pattern}: {:?}", paths);
+
         Ok(Pattern {
             pattern,
             paths: Some(paths),
@@ -239,7 +242,7 @@ impl Deref for Pattern {
     }
 }
 
-fn get_paths_size(paths: &Vec<PathBuf>) -> u64 {
+fn get_paths_size(paths: &[PathBuf]) -> u64 {
     let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
 
     let mut buf: LinkedList<PathBuf> = LinkedList::new();
@@ -252,23 +255,25 @@ fn get_paths_size(paths: &Vec<PathBuf>) -> u64 {
         let current_path = buf.pop_front().unwrap();
 
         // don't get the size for already visited paths
+        // eg when a glob pattern contains both the parent
+        // directory its files
         if visited.contains(&current_path) {
             continue;
         }
 
-        if current_path.is_file() {
-            if let Ok(meta) = current_path.metadata() {
-                size += meta.len();
-            }
-            visited.insert(current_path);
-            continue;
+        if let Ok(meta) = current_path.metadata() {
+            size += meta.len();
         }
 
-        if let Ok(current_dir) = fs::read_dir(&current_path) {
-            current_dir
-                .filter_map(|entry| entry.ok())
-                .for_each(|path| buf.push_back(path.path()));
+        if current_path.is_dir() {
+            if let Ok(current_dir) = fs::read_dir(&current_path) {
+                current_dir
+                    .filter_map(|entry| entry.ok())
+                    .for_each(|path| buf.push_back(path.path()));
+            }
         }
+
+        visited.insert(current_path);
     }
 
     size
