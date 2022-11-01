@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, path::Path};
+use std::{collections::HashMap, ffi::OsStr, fmt::Debug, path::Path};
 
 #[derive(Debug)]
 pub struct PathTree<'a, T> {
@@ -24,9 +24,14 @@ where
         }
     }
 
-    pub fn insert(&mut self, path: &'a Path, val: T) {
-        let mut path_iter = path.iter();
-        let first = match path_iter.next() {
+    /// Inserts a path into the prefix tree.
+    ///
+    /// Considers two scenarios:
+    /// 1. Ingores paths for which a parent path is already in the tree.
+    /// 2. Removes all children if a parent path is inserted.
+    pub fn insert(&mut self, raw_path: &'a OsStr, val: T) {
+        let path = Path::new(raw_path);
+        let first = match path.iter().next() {
             Some(first) => first,
             None => {
                 // if the path is empty, then this node is a leaf
@@ -43,73 +48,84 @@ where
 
         self.children
             .entry(first.as_ref())
-            .or_insert(PathTree::with_capacity(0))
-            .insert(path.strip_prefix(first).unwrap(), val);
+            .or_insert(PathTree::with_capacity(1))
+            .insert(path.strip_prefix(first).unwrap().as_os_str(), val);
     }
 
-    fn traverse_tree(&self, path: &'a Path) -> Option<&Self> {
-        let mut tree = self;
-        for subpath in path.iter() {
-            let subpath = tree.children.get(&subpath.as_ref());
-            println!("traverse_tree: {:?}", subpath);
-            if let Some(child_tree) = subpath {
-                tree = child_tree;
-                continue;
+    fn traverse_tree<S: AsRef<OsStr>>(&self, os_path: S) -> Option<&Self> {
+        let path = Path::new(&os_path);
+        let first = match path.iter().next() {
+            Some(first) => first,
+            None => {
+                // if the path is empty, then this node is a leaf
+                return Some(self);
             }
+        };
 
-            return None;
+        match self.children.get(Path::new(first)) {
+            Some(child_tree) => {
+                child_tree.traverse_tree(path.strip_prefix(first).unwrap().as_os_str())
+            }
+            _ => None,
         }
-
-        Some(tree)
     }
 
-    pub fn get(&self, path: &'a Path) -> Option<&T> {
-        self.traverse_tree(path)?.val.as_ref()
+    pub fn get<S: AsRef<OsStr>>(&self, os_path: S) -> Option<&T> {
+        self.traverse_tree(os_path)?.val.as_ref()
     }
 
-    pub fn contains_subpath(&self, subpath: &'a Path) -> bool {
-        self.traverse_tree(subpath).is_some()
+    pub fn contains_subpath<S: AsRef<OsStr>>(&self, os_subpath: S) -> bool {
+        self.traverse_tree(os_subpath).is_some()
     }
 }
 
-// scenario 1:
-// PathTree contains: /tmp/a/b
-// add: /tmp/a
-// action: remove /tmp/a/**
-//
-// scenario 2:
-// PathTree contains: /tmp/a
-// add: /tmp/a/b
-// action: do nothing
-
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::PathTree;
+    use std::ffi::OsStr;
 
     #[test]
     fn insert_and_get() {
         let mut path_tree = PathTree::new();
-        path_tree.insert("/tmp/a/b".as_ref(), ());
+        path_tree.insert(OsStr::new("/tmp/a/b"), ());
 
-        assert_eq!(path_tree.get("/tmp/a/b".as_ref()), Some(&()));
-        assert_eq!(path_tree.get("/tmp/a".as_ref()), None);
-        assert_eq!(path_tree.get("/tmp/a/b/c".as_ref()), None);
-        assert_eq!(path_tree.get("/tmp/a/b.a".as_ref()), None);
-        assert_eq!(path_tree.get("tmp/a/b".as_ref()), None);
+        assert_eq!(path_tree.get("/tmp/a/b"), Some(&()));
+        assert_eq!(path_tree.get("/tmp/a"), None);
+        assert_eq!(path_tree.get("/tmp/a/b/c"), None);
+        assert_eq!(path_tree.get("/tmp/a/b.a"), None);
+        assert_eq!(path_tree.get("tmp/a/b"), None);
     }
 
     #[test]
     fn contains_subpath() {
         let mut path_tree = PathTree::new();
-        path_tree.insert("/tmp/a/b".as_ref(), ());
+        path_tree.insert(OsStr::new("/tmp/a/b"), ());
 
-        assert!(path_tree.contains_subpath("/".as_ref()));
-        assert!(path_tree.contains_subpath("/tmp".as_ref()));
-        assert!(path_tree.contains_subpath("/tmp/a".as_ref()));
-        assert!(path_tree.contains_subpath("/tmp/a/b".as_ref()));
-        assert!(!path_tree.contains_subpath("/tmp/a/c".as_ref()));
-        assert!(!path_tree.contains_subpath("tmp/a/b".as_ref()));
+        assert!(path_tree.contains_subpath("/"));
+        assert!(path_tree.contains_subpath("/tmp"));
+        assert!(path_tree.contains_subpath("/tmp/a"));
+        assert!(path_tree.contains_subpath("/tmp/a/b"));
+        assert!(!path_tree.contains_subpath("/tmp/a/c"));
+        assert!(!path_tree.contains_subpath("tmp/a/b"));
+    }
+
+    #[test]
+    fn insert_parent_path_removes_child() {
+        let mut path_tree = PathTree::new();
+        path_tree.insert(OsStr::new("/tmp/a/b"), ());
+        path_tree.insert(OsStr::new("/tmp/a"), ());
+
+        assert_eq!(path_tree.get("/tmp/a"), Some(&()));
+        assert_eq!(path_tree.get("/tmp/a/b"), None);
+    }
+
+    #[test]
+    fn insert_child_path_is_ignored() {
+        let mut path_tree = PathTree::new();
+        path_tree.insert(OsStr::new("/tmp/a"), ());
+        path_tree.insert(OsStr::new("/tmp/a/b"), ());
+
+        assert_eq!(path_tree.get("/tmp/a"), Some(&()));
+        assert_eq!(path_tree.get("/tmp/a/b"), None);
     }
 }
