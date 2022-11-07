@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
-use rayon::prelude::*;
-use std::collections::{HashSet, LinkedList};
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::convert::From;
 use std::fmt;
 use std::fs::{self, File};
@@ -14,6 +14,8 @@ use std::str::FromStr;
 use std::string::{ParseError, String};
 use std::sync::Mutex;
 use std::vec::Vec;
+
+use crate::path::PathTree;
 
 pub struct Rules<'a> {
     file_path: &'a Path,
@@ -162,16 +164,22 @@ impl Pattern {
         })
     }
 
-    pub fn get_size(&self) -> Option<u64> {
-        if self.size.lock().unwrap().is_some() {
-            return *self.size.lock().unwrap();
-        }
+    pub fn get_size<'a>(&'a self, path_tree: &'a RefCell<PathTree<'a>>) -> Option<u64> {
+        let size: u64 = self
+            .paths
+            .as_ref()?
+            .iter()
+            .filter_map(|path| path_tree.borrow_mut().insert(path))
+            .sum();
 
-        let paths = self.paths.as_ref()?;
-        let size = get_paths_size(paths);
+        log::debug!("pattern get_size: {:?}: {}", self.pattern, size);
 
         let _ = self.size.lock().unwrap().insert(size);
         Some(size)
+    }
+
+    pub fn get_size_cached(&self) -> Option<u64> {
+        *self.size.lock().unwrap()
     }
 
     pub fn num_files(&self) -> u64 {
@@ -242,39 +250,39 @@ impl Deref for Pattern {
     }
 }
 
-fn get_paths_size(paths: &[PathBuf]) -> u64 {
-    let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
+//fn get_paths_size(paths: &[PathBuf]) -> u64 {
+//    let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
 
-    let mut buf: LinkedList<PathBuf> = LinkedList::new();
-    paths
-        .iter()
-        .for_each(|path| buf.push_back(path.to_path_buf()));
+//    let mut buf: LinkedList<PathBuf> = LinkedList::new();
+//    paths
+//        .iter()
+//        .for_each(|path| buf.push_back(path.to_path_buf()));
 
-    let mut size: u64 = 0;
-    while !buf.is_empty() {
-        let current_path = buf.pop_front().unwrap();
+//    let mut size: u64 = 0;
+//    while !buf.is_empty() {
+//        let current_path = buf.pop_front().unwrap();
 
-        // don't get the size for already visited paths
-        // eg when a glob pattern contains both the parent
-        // directory its files
-        if visited.contains(&current_path) {
-            continue;
-        }
+//        // don't get the size for already visited paths
+//        // eg when a glob pattern contains both the parent
+//        // directory its files
+//        if visited.contains(&current_path) {
+//            continue;
+//        }
 
-        if let Ok(meta) = current_path.metadata() {
-            size += meta.len();
-        }
+//        if let Ok(meta) = current_path.metadata() {
+//            size += meta.len();
+//        }
 
-        if current_path.is_dir() {
-            if let Ok(current_dir) = fs::read_dir(&current_path) {
-                current_dir
-                    .filter_map(|entry| entry.ok())
-                    .for_each(|path| buf.push_back(path.path()));
-            }
-        }
+//        if current_path.is_dir() {
+//            if let Ok(current_dir) = fs::read_dir(&current_path) {
+//                current_dir
+//                    .filter_map(|entry| entry.ok())
+//                    .for_each(|path| buf.push_back(path.path()));
+//            }
+//        }
 
-        visited.insert(current_path);
-    }
+//        visited.insert(current_path);
+//    }
 
-    size
-}
+//    size
+//}
