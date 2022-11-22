@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
@@ -111,8 +111,8 @@ pub struct Pattern {
     pattern: String,
     paths: Option<Vec<PathBuf>>,
     size: Mutex<Option<u64>>,
-    num_files: u64,
-    num_dirs: u64,
+    num_files: Mutex<u64>,
+    num_dirs: Mutex<u64>,
 }
 
 impl Default for Pattern {
@@ -121,8 +121,8 @@ impl Default for Pattern {
             pattern: "".to_owned(),
             paths: None,
             size: Mutex::new(None),
-            num_files: 0,
-            num_dirs: 0,
+            num_files: Mutex::new(0),
+            num_dirs: Mutex::new(0),
         }
     }
 }
@@ -144,11 +144,7 @@ impl Pattern {
         let paths: Vec<PathBuf> = glob_paths
             .flatten()
             .map(|path| {
-                if path.is_file() {
-                    num_files += 1;
-                } else if path.is_dir() {
-                    num_dirs += 1;
-                }
+                Self::count_files(&path, &mut num_files, &mut num_dirs);
                 path
             })
             .collect();
@@ -159,22 +155,59 @@ impl Pattern {
             pattern,
             paths: Some(paths),
             size: Mutex::new(None),
-            num_files,
-            num_dirs,
+            num_files: Mutex::new(num_files),
+            num_dirs: Mutex::new(num_dirs),
         })
     }
 
-    pub fn get_size<'a>(&'a self, path_tree: &'a RefCell<PathTree<'a>>) -> Option<u64> {
+    fn count_files<'a>(
+        path: &'a PathBuf,
+        num_files: &'a mut u64,
+        num_dirs: &'a mut u64,
+    ) -> &'a PathBuf {
+        if path.is_file() {
+            *num_files += 1;
+        } else if path.is_dir() {
+            *num_dirs += 1;
+        }
+        path
+    }
+
+    pub fn insert<'a>(&'a self, path_tree: &'a RefCell<PathTree<'a>>) -> Result<()> {
+        self.paths
+            .as_ref()
+            .ok_or_else(|| anyhow!("no paths given"))?
+            .iter()
+            .for_each(|path| {
+                path_tree.borrow_mut().insert(path);
+            });
+
+        Ok(())
+    }
+
+    pub fn get_size<'a>(&'a self, path_tree: &'a PathTree<'a>) -> Option<u64> {
+        let mut num_files: u64 = 0;
+        let mut num_dirs: u64 = 0;
+
         let size: u64 = self
             .paths
             .as_ref()?
             .iter()
-            .filter_map(|path| path_tree.borrow_mut().insert(path))
+            .filter_map(|path| {
+                let size = path_tree.get_size_at(&path);
+                if size.unwrap_or_else(|| 0) > 0 {
+                    Self::count_files(&path, &mut num_files, &mut num_dirs);
+                }
+                size
+            })
             .sum();
 
         log::debug!("pattern get_size: {:?}: {}", self.pattern, size);
 
         let _ = self.size.lock().unwrap().insert(size);
+        *self.num_files.lock().unwrap() = num_files;
+        *self.num_dirs.lock().unwrap() = num_dirs;
+
         Some(size)
     }
 
@@ -183,15 +216,15 @@ impl Pattern {
     }
 
     pub fn num_files(&self) -> u64 {
-        self.num_files
+        *self.num_files.lock().unwrap()
     }
 
     pub fn num_dirs(&self) -> u64 {
-        self.num_dirs
+        *self.num_dirs.lock().unwrap()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.num_files + self.num_dirs == 0
+        self.num_files() + self.num_dirs() == 0
     }
 
     pub fn clean(&self, verbose_mode: bool) -> Result<()> {

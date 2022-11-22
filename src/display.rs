@@ -8,27 +8,18 @@ pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
     let mut stdout = io::stdout();
 
     let path_tree = RefCell::new(PathTree::new());
-
-    //for pattern in &patterns {
-    //    let paths = pattern.get_paths().unwrap();
-    //    let _size: u64 = paths.iter().filter_map(|path| path_tree.insert(path)).sum();
-    //}
-
-    //let total_size: u64 = patterns
-    //    .iter()
-    //    .map(|pattern| pattern.get_size(&path_tree).unwrap_or(0))
-    //    .sum();
-
     patterns.iter().for_each(|pattern| {
-        pattern.get_size(&path_tree);
+        // insert pattern into path tree
+        pattern.insert(&path_tree);
+    });
+
+    // get the size of the individual patterns
+    // after all path are inserted into the tree
+    patterns.iter().for_each(|pattern| {
+        pattern.get_size(&path_tree.borrow());
     });
 
     let total_size = path_tree.borrow().get_size().unwrap_or(0);
-
-    //for pattern in &patterns {
-    //    pattern.get_size(&path_tree);
-    //}
-
     if total_size == 0 {
         write_boxed(&mut stdout, "There is nothing to do :)").unwrap();
         return;

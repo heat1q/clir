@@ -27,9 +27,7 @@ impl<'a> PathTree<'a> {
     /// 2. Removes all children if a parent path is inserted.
     pub fn insert(&mut self, path: &'a Path) -> Option<u64> {
         let calc_size = || get_path_size(path);
-        let size = self.insert_with(path, calc_size);
-        //log::debug!("insert {:?}: size {:?}", path, size);
-        size
+        self.insert_with(path, calc_size)
     }
 
     pub fn insert_with<F: Fn() -> u64>(&mut self, path: &'a Path, calc_size: F) -> Option<u64> {
@@ -92,10 +90,6 @@ impl<'a> PathTree<'a> {
         }
     }
 
-    pub fn get<P: AsRef<Path>>(&self, path: P) -> Option<u64> {
-        self.traverse_tree(path)?.size
-    }
-
     pub fn contains_subpath<P: AsRef<Path>>(&self, subpath: P) -> bool {
         self.traverse_tree(subpath).is_some()
     }
@@ -103,23 +97,11 @@ impl<'a> PathTree<'a> {
     pub fn get_size(&self) -> Option<u64> {
         self.size
     }
+
+    pub fn get_size_at<P: AsRef<Path>>(&self, path: P) -> Option<u64> {
+        self.traverse_tree(path)?.size
+    }
 }
-
-//impl<'a> Iterator for PathTree<'a> {
-//    type Item = u64;
-
-//    fn next(&mut self) -> Option<Self::Item> {
-//        if self.children.is_empty() {
-//            return self.size;
-//        }
-
-//        self.children
-//            .values()
-//            .nth(self.iter_nth)?
-//            .into_iter()
-//            .next()
-//    }
-//}
 
 fn get_path_size<P: AsRef<Path>>(path: P) -> u64 {
     WalkDir::new(path)
@@ -139,11 +121,7 @@ mod tests {
         let mut path_tree = PathTree::new();
         path_tree.insert(Path::new("/tmp/a/b"));
 
-        assert_eq!(path_tree.get("/tmp/a/b"), Some(0));
-        //assert_eq!(path_tree.get("/tmp/a"), None);
-        //assert_eq!(path_tree.get("/tmp/a/b/c"), None);
-        //assert_eq!(path_tree.get("/tmp/a/b.a"), None);
-        //assert_eq!(path_tree.get("tmp/a/b"), None);
+        assert_eq!(path_tree.get_size_at("/tmp/a/b"), Some(0));
     }
 
     #[test]
@@ -165,8 +143,8 @@ mod tests {
         path_tree.insert(Path::new("/tmp/a/b"));
         path_tree.insert(Path::new("/tmp/a"));
 
-        assert_eq!(path_tree.get("/tmp/a"), Some(0));
-        assert_eq!(path_tree.get("/tmp/a/b"), None);
+        assert_eq!(path_tree.get_size_at("/tmp/a"), Some(0));
+        assert_eq!(path_tree.get_size_at("/tmp/a/b"), None);
     }
 
     #[test]
@@ -175,8 +153,8 @@ mod tests {
         path_tree.insert(Path::new("/tmp/a"));
         path_tree.insert(Path::new("/tmp/a/b"));
 
-        assert_eq!(path_tree.get("/tmp/a"), Some(0));
-        assert_eq!(path_tree.get("/tmp/a/b"), None);
+        assert_eq!(path_tree.get_size_at("/tmp/a"), Some(0));
+        assert_eq!(path_tree.get_size_at("/tmp/a/b"), None);
     }
 
     #[test]
@@ -187,19 +165,19 @@ mod tests {
         path_tree.insert_with(Path::new("/home/potato"), || 8);
         path_tree.insert_with(Path::new("/tmp/d/e"), || 2);
 
-        assert_eq!(path_tree.get("/"), Some(16));
+        assert_eq!(path_tree.get_size_at("/"), Some(16));
+    }
+
+    #[test]
+    fn insert_with_overwrite() {
+        let mut path_tree = PathTree::new();
+        path_tree.insert_with(Path::new("/tmp/a.tmp"), || 2);
+        path_tree.insert_with(Path::new("/tmp/b.tmp"), || 4);
+        path_tree.insert_with(Path::new("/tmp/c"), || 4);
+        path_tree.insert_with(Path::new("/tmp/c/d.tmp"), || 4);
+        path_tree.insert_with(Path::new("/tmp/f/f.tmp"), || 4);
+        path_tree.insert_with(Path::new("/tmp"), || 16);
+
+        assert_eq!(path_tree.get_size_at("/"), Some(16));
     }
 }
-
-/*
-PathTree {
-    children: {
-        "/": PathTree {
-            children: {
-                "tmp": PathTree { children: {"a": PathTree { children: {}, size: Some(2) }, "b": PathTree { children: {}, size: Some(4) }}, size: Some(6) },
-                "home": PathTree { children: {"potato": PathTree { children: {}, size: Some(8) }}, size: Some(8) }},
-        size: Some(16) }
-    },
-    size: Some(26)
-}
- */
