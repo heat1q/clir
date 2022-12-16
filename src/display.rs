@@ -1,17 +1,25 @@
-use crate::rules::Pattern;
+use crate::{path::PathTree, rules::Pattern};
 use anyhow::{Ok, Result};
 use io::Write;
 use rayon::prelude::*;
-use std::{convert::TryInto, fmt::Display, io, path::Path};
+use std::{cell::RefCell, convert::TryInto, fmt::Display, io, path::Path};
 
 pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
     let mut stdout = io::stdout();
 
-    let total_size: u64 = patterns
-        .par_iter()
-        .map(|pattern| pattern.get_size().unwrap_or(0))
-        .sum();
+    let path_tree = RefCell::new(PathTree::new());
+    patterns.iter().for_each(|pattern| {
+        // insert pattern into path tree
+        pattern.insert(&path_tree);
+    });
 
+    // get the size of the individual patterns
+    // after all path are inserted into the tree
+    patterns.iter().for_each(|pattern| {
+        pattern.get_size(&path_tree.borrow());
+    });
+
+    let total_size = path_tree.borrow().get_size().unwrap_or(0);
     if total_size == 0 {
         write_boxed(&mut stdout, "There is nothing to do :)").unwrap();
         return;
@@ -21,7 +29,7 @@ pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
         .into_iter()
         .filter(|pattern| !pattern.is_empty())
         .collect();
-    patterns.par_sort_by_cached_key(|k| k.get_size());
+    patterns.par_sort_by_cached_key(|k| k.get_size_cached());
     patterns
         .iter()
         .for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size).unwrap());
@@ -49,14 +57,14 @@ fn write_pattern(
 ) -> Result<()> {
     const SCALE: i32 = 8;
     let mut quota =
-        (pattern.get_size().unwrap_or(0) as f64 / total_size as f64 * SCALE as f64) as i32;
+        (pattern.get_size_cached().unwrap_or(0) as f64 / total_size as f64 * SCALE as f64) as i32;
     quota = std::cmp::min(SCALE, quota + 1);
     let used = "|".repeat(quota.try_into().unwrap_or(0));
     let free = " ".repeat((SCALE - quota).try_into().unwrap_or(0));
     writeln!(
         w,
         "  [{used}{free}]  {}    {} ({} , {} )",
-        SizeUnit::new(pattern.get_size().unwrap_or(0)),
+        SizeUnit::new(pattern.get_size_cached().unwrap_or(0)),
         format_relative_path(workdir, pattern),
         pattern.num_files(),
         pattern.num_dirs(),

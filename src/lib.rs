@@ -6,6 +6,7 @@ use std::{env, path::Path};
 
 mod cmd;
 mod display;
+mod path;
 mod rules;
 
 pub fn run() -> Result<()> {
