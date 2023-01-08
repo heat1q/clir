@@ -37,9 +37,12 @@ impl<'a> PathTree<'a> {
             None => {
                 // if the sub path is empty, then this node is a leaf
                 // and we calc the size
-                self.size = Some(calc_size());
+                let size = calc_size();
+                let diff = size - self.size.unwrap_or(0);
+                self.size = Some(size);
                 self.children.clear();
-                return self.size;
+                // return the diff in size when the node is updated
+                return Some(diff);
             }
         };
 
@@ -56,13 +59,8 @@ impl<'a> PathTree<'a> {
             .insert_with(sub_path, calc_size);
 
         // add child node size to current
-        if child_size.is_some() {
-            self.size = Some(
-                self.children
-                    .values()
-                    .filter_map(|val| val.size)
-                    .sum::<u64>(),
-            );
+        if let Some(child_sz) = child_size {
+            self.size = Some(self.size.unwrap_or(0) + child_sz);
         }
 
         // propagate size to parent

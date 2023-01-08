@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
 use std::sync::Mutex;
+use std::time::Instant;
 use std::vec::Vec;
 
 use crate::path::PathTree;
@@ -34,7 +35,7 @@ impl<'a> Rules<'a> {
     }
 
     fn load(&mut self) -> Result<()> {
-        if let Ok(file_content) = fs::read(&self.file_path) {
+        if let Ok(file_content) = fs::read(self.file_path) {
             if let Ok(lines) = String::from_utf8(file_content) {
                 for line in lines.split('\n') {
                     // ignore emtpy lines
@@ -53,7 +54,7 @@ impl<'a> Rules<'a> {
             Ok(())
         } else {
             // create empty rules file if not exist
-            fs::write(&self.file_path, &[]).context("failed to create rules file")
+            fs::write(self.file_path, []).context("failed to create rules file")
         }
     }
 
@@ -82,9 +83,9 @@ impl<'a> Rules<'a> {
     }
 
     pub fn write(&self) -> Result<()> {
-        fs::remove_file(&self.file_path)?;
+        fs::remove_file(self.file_path)?;
         let mut options = fs::OpenOptions::new();
-        let mut file: File = options.append(true).create(true).open(&self.file_path)?;
+        let mut file: File = options.append(true).create(true).open(self.file_path)?;
         for r in self.get() {
             let _n = file.write([r.to_string().as_str(), "\n"].concat().as_bytes())?;
         }
@@ -137,6 +138,7 @@ impl Eq for Pattern {}
 
 impl Pattern {
     fn new(pattern: String) -> Result<Self> {
+        let start = Instant::now();
         let glob_paths = glob(&pattern)?;
 
         let mut num_files: u64 = 0;
@@ -149,7 +151,11 @@ impl Pattern {
             })
             .collect();
 
-        log::debug!("pattern {pattern}: {:?}", paths);
+        log::debug!(
+            "new pattern {pattern}: num_paths: {}, time: {:?}",
+            paths.len(),
+            Instant::elapsed(&start)
+        );
 
         Ok(Pattern {
             pattern,
@@ -174,6 +180,7 @@ impl Pattern {
     }
 
     pub fn insert<'a>(&'a self, path_tree: &'a RefCell<PathTree<'a>>) -> Result<()> {
+        let start = Instant::now();
         self.paths
             .as_ref()
             .ok_or_else(|| anyhow!("no paths given"))?
@@ -182,6 +189,12 @@ impl Pattern {
                 path_tree.borrow_mut().insert(path);
             });
 
+        log::debug!(
+            "pattern insert: {:?}, time: {:?}",
+            self.pattern,
+            Instant::elapsed(&start)
+        );
+
         Ok(())
     }
 
@@ -189,20 +202,27 @@ impl Pattern {
         let mut num_files: u64 = 0;
         let mut num_dirs: u64 = 0;
 
+        let start = Instant::now();
+
         let size: u64 = self
             .paths
             .as_ref()?
             .iter()
             .filter_map(|path| {
-                let size = path_tree.get_size_at(&path);
-                if size.unwrap_or_else(|| 0) > 0 {
-                    Self::count_files(&path, &mut num_files, &mut num_dirs);
+                let size = path_tree.get_size_at(path);
+                if size.unwrap_or(0) > 0 {
+                    Self::count_files(path, &mut num_files, &mut num_dirs);
                 }
                 size
             })
             .sum();
 
-        log::debug!("pattern get_size: {:?}: {}", self.pattern, size);
+        log::debug!(
+            "pattern get_size: {:?}: {}, time: {:?}",
+            self.pattern,
+            size,
+            Instant::elapsed(&start)
+        );
 
         let _ = self.size.lock().unwrap().insert(size);
         *self.num_files.lock().unwrap() = num_files;
