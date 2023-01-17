@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::Path};
+use rayon::prelude::*;
+use std::{
+    collections::HashMap,
+    fs::{self, Metadata},
+    path::Path,
+};
 use walkdir::WalkDir;
 
 #[derive(Debug)]
@@ -26,7 +31,7 @@ impl<'a> PathTree<'a> {
     /// 1. Ingores paths for which a parent path is already in the tree.
     /// 2. Removes all children if a parent path is inserted.
     pub fn insert(&mut self, path: &'a Path) -> Option<u64> {
-        let calc_size = || get_path_size(path);
+        let calc_size = || get_path_size_par(path, None);
         self.insert_with(path, calc_size)
     }
 
@@ -107,6 +112,28 @@ fn get_path_size<P: AsRef<Path>>(path: P) -> u64 {
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.metadata().unwrap().len())
         .sum()
+}
+
+fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
+    let Some(meta) = meta.or_else(|| fs::metadata(&path).ok()) else {
+        return 0;
+    };
+
+    if meta.is_file() || meta.is_symlink() {
+        return meta.len();
+    }
+
+    if meta.is_dir() {
+        if let Ok(dir_path) = fs::read_dir(path) {
+            return dir_path
+                .par_bridge()
+                .filter_map(|entry| entry.ok())
+                .map(|entry| get_path_size_par(entry.path(), entry.metadata().ok()))
+                .sum();
+        }
+    }
+
+    0
 }
 
 #[cfg(test)]

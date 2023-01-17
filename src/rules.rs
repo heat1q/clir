@@ -6,8 +6,8 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::convert::From;
 use std::fmt;
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufWriter, Write};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -84,11 +84,17 @@ impl<'a> Rules<'a> {
 
     pub fn write(&self) -> Result<()> {
         fs::remove_file(self.file_path)?;
-        let mut options = fs::OpenOptions::new();
-        let mut file: File = options.append(true).create(true).open(self.file_path)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(self.file_path)?;
+
+        let mut file_buf = BufWriter::new(file);
         for r in self.get() {
-            let _n = file.write([r.to_string().as_str(), "\n"].concat().as_bytes())?;
+            let _n = file_buf.write([r.to_string().as_str(), "\n"].concat().as_bytes())?;
         }
+
+        file_buf.flush()?;
 
         Ok(())
     }
@@ -302,40 +308,3 @@ impl Deref for Pattern {
         &self.pattern
     }
 }
-
-//fn get_paths_size(paths: &[PathBuf]) -> u64 {
-//    let mut visited: HashSet<PathBuf> = HashSet::with_capacity(paths.len());
-
-//    let mut buf: LinkedList<PathBuf> = LinkedList::new();
-//    paths
-//        .iter()
-//        .for_each(|path| buf.push_back(path.to_path_buf()));
-
-//    let mut size: u64 = 0;
-//    while !buf.is_empty() {
-//        let current_path = buf.pop_front().unwrap();
-
-//        // don't get the size for already visited paths
-//        // eg when a glob pattern contains both the parent
-//        // directory its files
-//        if visited.contains(&current_path) {
-//            continue;
-//        }
-
-//        if let Ok(meta) = current_path.metadata() {
-//            size += meta.len();
-//        }
-
-//        if current_path.is_dir() {
-//            if let Ok(current_dir) = fs::read_dir(&current_path) {
-//                current_dir
-//                    .filter_map(|entry| entry.ok())
-//                    .for_each(|path| buf.push_back(path.path()));
-//            }
-//        }
-
-//        visited.insert(current_path);
-//    }
-
-//    size
-//}
