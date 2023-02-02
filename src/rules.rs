@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
+use rayon::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::convert::From;
@@ -59,11 +60,13 @@ impl<'a> Rules<'a> {
     }
 
     pub fn add(&mut self, patterns: Vec<String>) -> Result<()> {
-        for pattern in patterns {
-            if let Ok(pattern) = Pattern::new(pattern) {
-                self.collection.insert(pattern);
-            }
-        }
+        patterns
+            .into_iter()
+            .map(Pattern::new)
+            .filter_map(Result::ok)
+            .for_each(|p| {
+                self.collection.insert(p);
+            });
 
         log::info!("rules: {:?}", self.get());
         self.write()?;
@@ -72,10 +75,12 @@ impl<'a> Rules<'a> {
     }
 
     pub fn remove(&mut self, patterns: Vec<String>) -> Result<()> {
-        for pattern in patterns {
-            self.collection
-                .remove(&Pattern::from_str(pattern.as_str()).unwrap());
-        }
+        patterns
+            .iter()
+            .filter_map(|p| Pattern::from_str(p).ok())
+            .for_each(|p| {
+                self.collection.remove(&p);
+            });
 
         self.write()?;
 
@@ -104,10 +109,11 @@ impl<'a> Rules<'a> {
     }
 
     pub fn clean(&self, verbose_mode: bool) -> Result<()> {
-        self.collection.iter().for_each(|pattern| {
-            // TODO - error handling
-            let _res = pattern.clean(verbose_mode);
-        });
+        let _n = self
+            .collection
+            .par_iter()
+            .filter_map(|p| p.clean(verbose_mode).ok())
+            .count();
 
         Ok(())
     }
@@ -151,9 +157,9 @@ impl Pattern {
         let mut num_dirs: u64 = 0;
         let paths: Vec<PathBuf> = glob_paths
             .flatten()
-            .map(|path| {
+            .filter_map(|path| {
                 Self::count_files(&path, &mut num_files, &mut num_dirs);
-                path
+                fs::canonicalize(&path).ok()
             })
             .collect();
 

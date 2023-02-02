@@ -4,7 +4,6 @@ use std::{
     fs::{self, Metadata},
     path::Path,
 };
-use walkdir::WalkDir;
 
 #[derive(Debug)]
 pub struct PathTree<'a> {
@@ -37,18 +36,15 @@ impl<'a> PathTree<'a> {
 
     pub fn insert_with<F: Fn() -> u64>(&mut self, path: &'a Path, calc_size: F) -> Option<u64> {
         // path: /tmp/a
-        let first = match path.iter().next() {
-            Some(first) => first,
-            None => {
-                // if the sub path is empty, then this node is a leaf
-                // and we calc the size
-                let size = calc_size();
-                let diff = size - self.size.unwrap_or(0);
-                self.size = Some(size);
-                self.children.clear();
-                // return the diff in size when the node is updated
-                return Some(diff);
-            }
+        let Some(first) = path.iter().next() else {
+            // if the sub path is empty, then this node is a leaf
+            // and we calc the size
+            let size = calc_size();
+            let diff = size - self.size.unwrap_or(0);
+            self.size = Some(size);
+            self.children.clear();
+            // return the diff in size when the node is updated
+            return Some(diff);
         };
 
         // never add children to leafs
@@ -77,20 +73,14 @@ impl<'a> PathTree<'a> {
     }
 
     fn traverse_tree<P: AsRef<Path>>(&self, path: P) -> Option<&Self> {
-        let first = match path.as_ref().iter().next() {
-            Some(first) => first,
-            None => {
-                // if the path is empty, then this node is a leaf
-                return Some(self);
-            }
+        let Some(first) = path.as_ref().iter().next() else {
+            // if the path is empty, then this node is a leaf
+            return Some(self);
         };
 
-        match self.children.get(Path::new(first)) {
-            Some(child_tree) => {
-                child_tree.traverse_tree(path.as_ref().strip_prefix(first).unwrap().as_os_str())
-            }
-            _ => None,
-        }
+        self.children
+            .get(Path::new(first))
+            .and_then(|p| p.traverse_tree(path.as_ref().strip_prefix(first).ok()?.as_os_str()))
     }
 
     pub fn contains_subpath<P: AsRef<Path>>(&self, subpath: P) -> bool {
@@ -104,14 +94,6 @@ impl<'a> PathTree<'a> {
     pub fn get_size_at<P: AsRef<Path>>(&self, path: P) -> Option<u64> {
         self.traverse_tree(path)?.size
     }
-}
-
-fn get_path_size<P: AsRef<Path>>(path: P) -> u64 {
-    WalkDir::new(path)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.metadata().unwrap().len())
-        .sum()
 }
 
 fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
