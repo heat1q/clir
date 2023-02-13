@@ -2,16 +2,16 @@ use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs::{self, Metadata},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 #[derive(Debug)]
-pub struct PathTree<'a> {
-    children: HashMap<&'a Path, PathTree<'a>>,
+pub struct PathTree {
+    children: HashMap<PathBuf, PathTree>,
     size: Option<u64>,
 }
 
-impl<'a> PathTree<'a> {
+impl PathTree {
     pub fn new() -> Self {
         Self::with_capacity(0)
     }
@@ -29,12 +29,12 @@ impl<'a> PathTree<'a> {
     /// Considers two scenarios:
     /// 1. Ingores paths for which a parent path is already in the tree.
     /// 2. Removes all children if a parent path is inserted.
-    pub fn insert(&mut self, path: &'a Path) -> Option<u64> {
+    pub fn insert(&mut self, path: &Path) -> Option<u64> {
         let calc_size = || get_path_size_par(path, None);
         self.insert_with(path, calc_size)
     }
 
-    pub fn insert_with<F: Fn() -> u64>(&mut self, path: &'a Path, calc_size: F) -> Option<u64> {
+    pub fn insert_with<F: Fn() -> u64>(&mut self, path: &Path, calc_size: F) -> Option<u64> {
         // path: /tmp/a
         let Some(first) = path.iter().next() else {
             // if the sub path is empty, then this node is a leaf
@@ -55,7 +55,7 @@ impl<'a> PathTree<'a> {
         let sub_path = path.strip_prefix(first).unwrap(); // tmp/a
         let child_size = self
             .children
-            .entry(first.as_ref())
+            .entry(PathBuf::from(first))
             .or_insert_with(|| PathTree::with_capacity(1))
             .insert_with(sub_path, calc_size);
 

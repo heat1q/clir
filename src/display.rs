@@ -2,37 +2,35 @@ use crate::{path::PathTree, rules::Pattern};
 use anyhow::{Ok, Result};
 use io::Write;
 use rayon::prelude::*;
-use std::{cell::RefCell, convert::TryInto, fmt::Display, io, path::Path};
+use std::{convert::TryInto, fmt::Display, io, path::Path};
 
-pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
+pub fn format_patterns(workdir: &Path, mut patterns: Vec<&Pattern>) -> Result<()> {
     let mut stdout = io::stdout();
 
-    let path_tree = RefCell::new(PathTree::new());
-    patterns.iter().for_each(|pattern| {
+    let mut path_tree = PathTree::new();
+    patterns.iter().try_for_each(|pattern| {
+        pattern.expand_glob()?;
         // insert pattern into path tree
-        pattern.insert(&path_tree);
-    });
+        pattern.insert(&mut path_tree)
+    })?;
 
     // get the size of the individual patterns
     // after all path are inserted into the tree
     patterns.iter().for_each(|pattern| {
-        pattern.get_size(&path_tree.borrow());
+        pattern.get_size(&path_tree);
     });
 
-    let total_size = path_tree.borrow().get_size().unwrap_or(0);
+    let total_size = path_tree.get_size().unwrap_or(0);
     if total_size == 0 {
-        write_boxed(&mut stdout, "There is nothing to do :)").unwrap();
-        return;
+        write_boxed(&mut stdout, "There is nothing to do :)")?;
+        return Ok(());
     }
 
-    let mut patterns: Vec<&Pattern> = patterns
-        .into_iter()
-        .filter(|pattern| !pattern.is_empty())
-        .collect();
     patterns.par_sort_by_cached_key(|k| k.get_size_cached());
     patterns
         .iter()
-        .for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size).unwrap());
+        .filter(|pattern| !pattern.is_empty())
+        .try_for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size))?;
 
     let num_files: u64 = patterns.par_iter().map(|p| p.num_files()).sum();
     let num_dirs: u64 = patterns.par_iter().map(|p| p.num_dirs()).sum();
@@ -45,8 +43,10 @@ pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
         (_, _) => format!("{num_files} file(s) and {num_dirs} directory(ies) to be freed"),
     });
 
-    write_boxed(&mut stdout, &summary).unwrap();
-    stdout.flush().unwrap();
+    write_boxed(&mut stdout, &summary)?;
+    stdout.flush()?;
+
+    Ok(())
 }
 
 fn write_pattern(

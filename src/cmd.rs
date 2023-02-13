@@ -31,12 +31,12 @@ impl<'a> Command<'a> {
         self.rules.remove(self.prefix_workdir(rules)?)
     }
 
-    pub fn list(&self) {
-        display::format_patterns(self.workdir, self.rules.get());
+    pub fn list(&self) -> Result<()> {
+        display::format_patterns(self.workdir, self.rules.get())
     }
 
     pub fn clean(&self) -> Result<()> {
-        self.list();
+        self.list()?;
         print!("\nClean all selected paths? [(Y)es/(N)o]: ");
         stdout().lock().flush()?;
 

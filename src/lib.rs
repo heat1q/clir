@@ -77,17 +77,15 @@ fn parse_args(app: &mut App, path: &Path) -> Result<()> {
                 .get_many("pattern")
                 .ok_or_else(|| anyhow!("invalid patterns for `add`"))?
                 .collect();
-            cmd.add_rules(rules)?;
+            cmd.add_rules(rules)
         }
         Some(("remove", p)) => {
             let rules: Vec<&String> = p
                 .get_many("pattern")
                 .ok_or_else(|| anyhow!("invalid patterns for `remove`"))?
                 .collect();
-            cmd.remove_rules(rules)?;
+            cmd.remove_rules(rules)
         }
         _ => cmd.list(),
-    };
-
-    Ok(())
+    }
 }

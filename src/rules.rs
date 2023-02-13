@@ -3,17 +3,16 @@ use core::cmp::Eq;
 use core::hash::Hash;
 use glob::glob;
 use rayon::prelude::*;
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::convert::From;
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
 
@@ -44,9 +43,8 @@ impl<'a> Rules<'a> {
                         continue;
                     }
 
-                    if let Ok(pattern) = Pattern::new(line.to_string()) {
-                        self.collection.insert(pattern);
-                    }
+                    let pattern = Pattern::new(line.to_string());
+                    self.collection.insert(pattern);
                 }
             } else {
                 anyhow::bail!("failed to parse rules file content")
@@ -60,13 +58,9 @@ impl<'a> Rules<'a> {
     }
 
     pub fn add(&mut self, patterns: Vec<String>) -> Result<()> {
-        patterns
-            .into_iter()
-            .map(Pattern::new)
-            .filter_map(Result::ok)
-            .for_each(|p| {
-                self.collection.insert(p);
-            });
+        patterns.into_iter().map(Pattern::new).for_each(|p| {
+            self.collection.insert(p);
+        });
 
         log::info!("rules: {:?}", self.get());
         self.write()?;
@@ -122,7 +116,7 @@ impl<'a> Rules<'a> {
 #[derive(Debug)]
 pub struct Pattern {
     pattern: String,
-    paths: Option<Vec<PathBuf>>,
+    paths: RwLock<Option<Vec<PathBuf>>>,
     size: Mutex<Option<u64>>,
     num_files: Mutex<u64>,
     num_dirs: Mutex<u64>,
@@ -132,7 +126,7 @@ impl Default for Pattern {
     fn default() -> Self {
         Pattern {
             pattern: "".to_owned(),
-            paths: None,
+            paths: RwLock::new(None),
             size: Mutex::new(None),
             num_files: Mutex::new(0),
             num_dirs: Mutex::new(0),
@@ -149,33 +143,11 @@ impl PartialEq for Pattern {
 impl Eq for Pattern {}
 
 impl Pattern {
-    fn new(pattern: String) -> Result<Self> {
-        let start = Instant::now();
-        let glob_paths = glob(&pattern)?;
-
-        let mut num_files: u64 = 0;
-        let mut num_dirs: u64 = 0;
-        let paths: Vec<PathBuf> = glob_paths
-            .flatten()
-            .filter_map(|path| {
-                Self::count_files(&path, &mut num_files, &mut num_dirs);
-                fs::canonicalize(&path).ok()
-            })
-            .collect();
-
-        log::debug!(
-            "new pattern {pattern}: num_paths: {}, time: {:?}",
-            paths.len(),
-            Instant::elapsed(&start)
-        );
-
-        Ok(Pattern {
+    fn new(pattern: String) -> Self {
+        Self {
             pattern,
-            paths: Some(paths),
-            size: Mutex::new(None),
-            num_files: Mutex::new(num_files),
-            num_dirs: Mutex::new(num_dirs),
-        })
+            ..Self::default()
+        }
     }
 
     fn count_files<'a>(
@@ -191,14 +163,42 @@ impl Pattern {
         path
     }
 
-    pub fn insert<'a>(&'a self, path_tree: &'a RefCell<PathTree<'a>>) -> Result<()> {
+    pub fn expand_glob(&self) -> Result<()> {
+        let start = Instant::now();
+        let glob_paths = glob(&self.pattern)?;
+
+        let mut num_files: u64 = 0;
+        let mut num_dirs: u64 = 0;
+        let paths: Vec<PathBuf> = glob_paths
+            .flatten()
+            .filter_map(|path| {
+                Self::count_files(&path, &mut num_files, &mut num_dirs);
+                fs::canonicalize(&path).ok()
+            })
+            .collect();
+
+        log::debug!(
+            "new pattern {}: num_paths: {}, time: {:?}",
+            self.pattern,
+            paths.len(),
+            Instant::elapsed(&start)
+        );
+
+        let _ = self.paths.write().unwrap().insert(paths);
+
+        Ok(())
+    }
+
+    pub fn insert(&self, path_tree: &mut PathTree) -> Result<()> {
         let start = Instant::now();
         self.paths
+            .read()
+            .unwrap()
             .as_ref()
             .ok_or_else(|| anyhow!("no paths given"))?
             .iter()
             .for_each(|path| {
-                path_tree.borrow_mut().insert(path);
+                path_tree.insert(path);
             });
 
         log::debug!(
@@ -210,7 +210,7 @@ impl Pattern {
         Ok(())
     }
 
-    pub fn get_size<'a>(&'a self, path_tree: &'a PathTree<'a>) -> Option<u64> {
+    pub fn get_size(&self, path_tree: &PathTree) -> Option<u64> {
         let mut num_files: u64 = 0;
         let mut num_dirs: u64 = 0;
 
@@ -218,6 +218,8 @@ impl Pattern {
 
         let size: u64 = self
             .paths
+            .read()
+            .unwrap()
             .as_ref()?
             .iter()
             .filter_map(|path| {
@@ -260,7 +262,7 @@ impl Pattern {
     }
 
     pub fn clean(&self, verbose_mode: bool) -> Result<()> {
-        for path in self.paths.as_ref().unwrap() {
+        for path in self.paths.read().unwrap().as_ref().unwrap() {
             if path.is_dir() {
                 if let Err(err) = fs::remove_dir_all(path) {
                     log::warn!("failed to removed {:?}: {err}", path);
