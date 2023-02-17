@@ -1,14 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
-use glob::glob;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::convert::From;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
@@ -16,7 +14,7 @@ use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
 
-use crate::path::PathTree;
+use crate::path::{canonicalize, PathTree};
 
 pub struct Rules<'a> {
     file_path: &'a Path,
@@ -43,7 +41,7 @@ impl<'a> Rules<'a> {
                         continue;
                     }
 
-                    let pattern = Pattern::new(line.to_string());
+                    let pattern = Pattern::from(line.to_string());
                     self.collection.insert(pattern);
                 }
             } else {
@@ -58,9 +56,13 @@ impl<'a> Rules<'a> {
     }
 
     pub fn add(&mut self, patterns: Vec<String>) -> Result<()> {
-        patterns.into_iter().map(Pattern::new).for_each(|p| {
-            self.collection.insert(p);
-        });
+        patterns
+            .into_iter()
+            .filter_map(canonicalize)
+            .map(Pattern::new)
+            .for_each(|p| {
+                self.collection.insert(p);
+            });
 
         log::info!("rules: {:?}", self.get());
         self.write()?;
@@ -115,7 +117,7 @@ impl<'a> Rules<'a> {
 
 #[derive(Debug)]
 pub struct Pattern {
-    pattern: String,
+    pattern: PathBuf,
     paths: RwLock<Option<Vec<PathBuf>>>,
     size: Mutex<Option<u64>>,
     num_files: Mutex<u64>,
@@ -125,7 +127,7 @@ pub struct Pattern {
 impl Default for Pattern {
     fn default() -> Self {
         Pattern {
-            pattern: "".to_owned(),
+            pattern: PathBuf::new(),
             paths: RwLock::new(None),
             size: Mutex::new(None),
             num_files: Mutex::new(0),
@@ -143,7 +145,7 @@ impl PartialEq for Pattern {
 impl Eq for Pattern {}
 
 impl Pattern {
-    fn new(pattern: String) -> Self {
+    fn new(pattern: PathBuf) -> Self {
         Self {
             pattern,
             ..Self::default()
@@ -163,9 +165,18 @@ impl Pattern {
         path
     }
 
-    pub fn expand_glob(&self) -> Result<()> {
+    pub fn expand_glob(&self, path_tree: &PathTree) -> Result<()> {
+        // no need to expand if the paths are already covered
+        if path_tree.contains_subpath(&self.pattern) {
+            return Ok(());
+        }
+
+        let glob_paths = glob::glob(
+            self.pattern
+                .to_str()
+                .ok_or_else(|| anyhow!("invalid pattern"))?,
+        )?;
         let start = Instant::now();
-        let glob_paths = glob(&self.pattern)?;
 
         let mut num_files: u64 = 0;
         let mut num_dirs: u64 = 0;
@@ -178,7 +189,7 @@ impl Pattern {
             .collect();
 
         log::debug!(
-            "new pattern {}: num_paths: {}, time: {:?}",
+            "new pattern {:?}: num_paths: {}, time: {:?}",
             self.pattern,
             paths.len(),
             Instant::elapsed(&start)
@@ -293,7 +304,7 @@ impl Hash for Pattern {
 
 impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.pattern)
+        write!(f, "{}", self.pattern.to_str().ok_or(fmt::Error {})?)
     }
 }
 
@@ -302,17 +313,21 @@ impl FromStr for Pattern {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let pattern = Pattern {
-            pattern: String::from(s),
+            pattern: PathBuf::from(s),
             ..Pattern::default()
         };
         Ok(pattern)
     }
 }
 
-impl Deref for Pattern {
-    type Target = str;
+impl AsRef<Path> for Pattern {
+    fn as_ref(&self) -> &Path {
+        Path::new(&self.pattern)
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.pattern
+impl From<String> for Pattern {
+    fn from(value: String) -> Self {
+        Self::new(PathBuf::from(value))
     }
 }

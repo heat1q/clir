@@ -6,13 +6,14 @@ use std::{convert::TryInto, fmt::Display, io, path::Path};
 
 pub fn format_patterns(workdir: &Path, mut patterns: Vec<&Pattern>) -> Result<()> {
     let mut stdout = io::stdout();
+    patterns.par_sort_by_cached_key(|k| k.as_ref().iter().count());
 
     let mut path_tree = PathTree::new();
     patterns.iter().try_for_each(|pattern| {
-        pattern.expand_glob()?;
+        pattern.expand_glob(&path_tree)?;
         // insert pattern into path tree
         pattern.insert(&mut path_tree)
-    })?;
+    });
 
     // get the size of the individual patterns
     // after all path are inserted into the tree

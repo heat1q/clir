@@ -2,7 +2,7 @@ use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs::{self, Metadata},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 #[derive(Debug)]
@@ -83,8 +83,23 @@ impl PathTree {
             .and_then(|p| p.traverse_tree(path.as_ref().strip_prefix(first).ok()?.as_os_str()))
     }
 
+    pub fn contains_parent<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.traverse_tree(path).is_some()
+    }
+
     pub fn contains_subpath<P: AsRef<Path>>(&self, subpath: P) -> bool {
-        self.traverse_tree(subpath).is_some()
+        let Some(subpath) = canonicalize(subpath) else {
+            return false;
+        };
+        let mut tree = self;
+        for p in subpath.iter() {
+            let Some(t) = tree.children.get(Path::new(p)) else {
+                return tree.is_leaf();
+            };
+            tree = t;
+        }
+
+        tree.is_leaf()
     }
 
     pub fn get_size(&self) -> Option<u64> {
@@ -118,10 +133,39 @@ fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
     0
 }
 
+pub(super) fn canonicalize<P: AsRef<Path>>(path: P) -> Option<PathBuf> {
+    let path = path.as_ref();
+    let mut components: Vec<Component> = vec![];
+
+    if !matches!(path.components().peekable().peek()?, Component::RootDir) {
+        return None;
+    }
+
+    for c in path.components() {
+        if matches!(c, Component::ParentDir) {
+            components.pop()?;
+            continue;
+        }
+        components.push(c)
+    }
+
+    Some(components.iter().map(|c| c.as_os_str()).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::PathTree;
-    use std::path::Path;
+    use crate::path::canonicalize;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn canonicalize_glob() {
+        assert_eq!(canonicalize("/tmp/..").unwrap(), PathBuf::from("/"));
+        assert_eq!(
+            canonicalize("/tmp//a/./../*.rs").unwrap(),
+            PathBuf::from("/tmp/*.rs")
+        );
+    }
 
     #[test]
     fn insert_and_get() {
@@ -134,14 +178,25 @@ mod tests {
     #[test]
     fn contains_subpath() {
         let mut path_tree = PathTree::new();
+        path_tree.insert_with(Path::new("/tmp/a"), || 1);
+
+        assert!(!path_tree.contains_subpath("/tmp"));
+        assert!(path_tree.contains_subpath("/tmp/a"));
+        assert!(path_tree.contains_subpath("/tmp/a/"));
+        assert!(path_tree.contains_subpath("/tmp/a/c/**/*.rs"));
+    }
+
+    #[test]
+    fn contains_parent() {
+        let mut path_tree = PathTree::new();
         path_tree.insert(Path::new("/tmp/a/b"));
 
-        assert!(path_tree.contains_subpath("/"));
-        assert!(path_tree.contains_subpath("/tmp"));
-        assert!(path_tree.contains_subpath("/tmp/a"));
-        assert!(path_tree.contains_subpath("/tmp/a/b"));
-        assert!(!path_tree.contains_subpath("/tmp/a/c"));
-        assert!(!path_tree.contains_subpath("tmp/a/b"));
+        assert!(path_tree.contains_parent("/"));
+        assert!(path_tree.contains_parent("/tmp"));
+        assert!(path_tree.contains_parent("/tmp/a"));
+        assert!(path_tree.contains_parent("/tmp/a/b"));
+        assert!(!path_tree.contains_parent("/tmp/a/c"));
+        assert!(!path_tree.contains_parent("tmp/a/b"));
     }
 
     #[test]
