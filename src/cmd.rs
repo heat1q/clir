@@ -6,16 +6,17 @@ use std::time;
 use anyhow::{Ok, Result};
 
 use crate::display;
-use crate::rules::Rules;
+use crate::path::PathTree;
+use crate::rules::{Pattern, Rules};
 
-pub struct Command<'a> {
+pub(crate) struct Command<'a> {
     rules: Rules<'a>,
     workdir: &'a Path,
     verbose_mode: bool,
 }
 
 impl<'a> Command<'a> {
-    pub fn new(rules: Rules<'a>, workdir: &'a Path, verbose_mode: bool) -> Command<'a> {
+    pub(crate) fn new(rules: Rules<'a>, workdir: &'a Path, verbose_mode: bool) -> Command<'a> {
         Command {
             rules,
             workdir,
@@ -23,20 +24,23 @@ impl<'a> Command<'a> {
         }
     }
 
-    pub fn add_rules(&mut self, rules: Vec<&String>) -> Result<()> {
+    pub(crate) fn add_rules(&mut self, rules: Vec<&String>) -> Result<()> {
         self.rules.add(self.prefix_workdir(rules)?)
     }
 
-    pub fn remove_rules(&mut self, rules: Vec<&String>) -> Result<()> {
+    pub(crate) fn remove_rules(&mut self, rules: Vec<&String>) -> Result<()> {
         self.rules.remove(self.prefix_workdir(rules)?)
     }
 
-    pub fn list(&self) -> Result<()> {
-        display::format_patterns(self.workdir, self.rules.get())
+    pub(crate) fn list(&self) -> Result<Vec<Pattern>> {
+        let mut path_tree = PathTree::new();
+        let patterns = self.rules.expand_patterns(&mut path_tree);
+        display::format_patterns(self.workdir, &path_tree, &patterns)?;
+        Ok(patterns)
     }
 
-    pub fn clean(&self) -> Result<()> {
-        self.list()?;
+    pub(crate) fn clean(&self) -> Result<()> {
+        let patterns = self.list()?;
         print!("\nClean all selected paths? [(Y)es/(N)o]: ");
         stdout().lock().flush()?;
 
@@ -45,7 +49,7 @@ impl<'a> Command<'a> {
 
         if confirm.starts_with('y') || confirm.starts_with('Y') {
             let start = time::Instant::now();
-            self.rules.clean(self.verbose_mode)?;
+            self.rules.clean(&patterns, self.verbose_mode)?;
             let elapsed = start.elapsed().as_millis();
             println!("Finished in {:.2}s", (elapsed as f64) / 1000.);
         } else {

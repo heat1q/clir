@@ -86,6 +86,6 @@ fn parse_args(app: &mut App, path: &Path) -> Result<()> {
                 .collect();
             cmd.remove_rules(rules)
         }
-        _ => cmd.list(),
+        _ => cmd.list().map(|_| ()),
     }
 }

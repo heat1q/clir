@@ -111,7 +111,7 @@ impl PathTree {
     }
 }
 
-fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
+pub(super) fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
     let Some(meta) = meta.or_else(|| fs::metadata(&path).ok()) else {
         return 0;
     };

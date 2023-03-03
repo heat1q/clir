@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use core::cmp::Eq;
 use core::hash::Hash;
 use rayon::prelude::*;
@@ -10,19 +10,18 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::{ParseError, String};
-use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
 
 use crate::path::{canonicalize, PathTree};
 
-pub struct Rules<'a> {
+pub(crate) struct Rules<'a> {
     file_path: &'a Path,
-    collection: HashSet<Pattern>,
+    collection: HashSet<RawPattern>,
 }
 
 impl<'a> Rules<'a> {
-    pub fn new(file_path: &'a Path) -> Result<Rules<'a>> {
+    pub(crate) fn new(file_path: &'a Path) -> Result<Rules<'a>> {
         let mut rules = Rules {
             file_path,
             collection: HashSet::new(),
@@ -41,8 +40,9 @@ impl<'a> Rules<'a> {
                         continue;
                     }
 
-                    let pattern = Pattern::from(line.to_string());
-                    self.collection.insert(pattern);
+                    if let Ok(pattern) = RawPattern::from_str(&line.to_string()) {
+                        self.collection.insert(pattern);
+                    }
                 }
             } else {
                 anyhow::bail!("failed to parse rules file content")
@@ -55,11 +55,11 @@ impl<'a> Rules<'a> {
         }
     }
 
-    pub fn add(&mut self, patterns: Vec<String>) -> Result<()> {
+    pub(crate) fn add(&mut self, patterns: Vec<String>) -> Result<()> {
         patterns
             .into_iter()
             .filter_map(canonicalize)
-            .map(Pattern::new)
+            .map(RawPattern::new)
             .for_each(|p| {
                 self.collection.insert(p);
             });
@@ -70,10 +70,10 @@ impl<'a> Rules<'a> {
         Ok(())
     }
 
-    pub fn remove(&mut self, patterns: Vec<String>) -> Result<()> {
+    pub(crate) fn remove(&mut self, patterns: Vec<String>) -> Result<()> {
         patterns
             .iter()
-            .filter_map(|p| Pattern::from_str(p).ok())
+            .filter_map(|p| RawPattern::from_str(p).ok())
             .for_each(|p| {
                 self.collection.remove(&p);
             });
@@ -83,7 +83,7 @@ impl<'a> Rules<'a> {
         Ok(())
     }
 
-    pub fn write(&self) -> Result<()> {
+    pub(crate) fn write(&self) -> Result<()> {
         fs::remove_file(self.file_path)?;
         let file = OpenOptions::new()
             .write(true)
@@ -100,13 +100,39 @@ impl<'a> Rules<'a> {
         Ok(())
     }
 
-    pub fn get(&self) -> Vec<&Pattern> {
+    pub(crate) fn get(&self) -> Vec<&RawPattern> {
         self.collection.iter().collect()
     }
 
-    pub fn clean(&self, verbose_mode: bool) -> Result<()> {
-        let _n = self
-            .collection
+    pub(crate) fn expand_patterns(&self, path_tree: &mut PathTree) -> Vec<Pattern> {
+        // patterns can be expanded concurrently
+        let patterns: Vec<Pattern> = self
+            .get()
+            .par_iter()
+            .filter_map(|pattern| pattern.expand_glob())
+            .collect();
+
+        // insert the paths into the tree
+        patterns
+            .iter()
+            .for_each(|pattern| pattern.insert(path_tree));
+
+        // get the size of the individual patterns after
+        // all path are inserted into the tree because
+        // now we can remove all the overlapping paths
+        let mut patterns: Vec<Pattern> = patterns
+            .into_iter()
+            .par_bridge()
+            .map(|p| p.filter_and_get_size(path_tree))
+            .filter(|p| !p.is_empty())
+            .collect();
+
+        patterns.par_sort_by_key(|p| p.get_size_cached());
+        patterns
+    }
+
+    pub(crate) fn clean(&self, patterns: &Vec<Pattern>, verbose_mode: bool) -> Result<()> {
+        let _n = patterns
             .par_iter()
             .filter_map(|p| p.clean(verbose_mode).ok())
             .count();
@@ -116,76 +142,30 @@ impl<'a> Rules<'a> {
 }
 
 #[derive(Debug)]
-pub struct Pattern {
+pub(crate) struct RawPattern {
     pattern: PathBuf,
-    paths: RwLock<Option<Vec<PathBuf>>>,
-    size: Mutex<Option<u64>>,
-    num_files: Mutex<u64>,
-    num_dirs: Mutex<u64>,
 }
 
-impl Default for Pattern {
-    fn default() -> Self {
-        Pattern {
-            pattern: PathBuf::new(),
-            paths: RwLock::new(None),
-            size: Mutex::new(None),
-            num_files: Mutex::new(0),
-            num_dirs: Mutex::new(0),
-        }
-    }
-}
-
-impl PartialEq for Pattern {
+impl PartialEq for RawPattern {
     fn eq(&self, other: &Self) -> bool {
         self.pattern == other.pattern
     }
 }
 
-impl Eq for Pattern {}
+impl Eq for RawPattern {}
 
-impl Pattern {
+impl RawPattern {
     fn new(pattern: PathBuf) -> Self {
-        Self {
-            pattern,
-            ..Self::default()
-        }
+        Self { pattern }
     }
 
-    fn count_files<'a>(
-        path: &'a PathBuf,
-        num_files: &'a mut u64,
-        num_dirs: &'a mut u64,
-    ) -> &'a PathBuf {
-        if path.is_file() {
-            *num_files += 1;
-        } else if path.is_dir() {
-            *num_dirs += 1;
-        }
-        path
-    }
-
-    pub fn expand_glob(&self, path_tree: &PathTree) -> Result<()> {
-        // no need to expand if the paths are already covered
-        if path_tree.contains_subpath(&self.pattern) {
-            return Ok(());
-        }
-
-        let glob_paths = glob::glob(
-            self.pattern
-                .to_str()
-                .ok_or_else(|| anyhow!("invalid pattern"))?,
-        )?;
+    pub(crate) fn expand_glob(&self) -> Option<Pattern<'_>> {
+        let glob_paths = glob::glob(self.pattern.to_str()?).ok()?;
         let start = Instant::now();
 
-        let mut num_files: u64 = 0;
-        let mut num_dirs: u64 = 0;
         let paths: Vec<PathBuf> = glob_paths
             .flatten()
-            .filter_map(|path| {
-                Self::count_files(&path, &mut num_files, &mut num_dirs);
-                fs::canonicalize(&path).ok()
-            })
+            .filter_map(|path| fs::canonicalize(path).ok())
             .collect();
 
         log::debug!(
@@ -195,85 +175,95 @@ impl Pattern {
             Instant::elapsed(&start)
         );
 
-        let _ = self.paths.write().unwrap().insert(paths);
+        Some(Pattern::new(self.pattern.as_path(), paths))
+    }
+}
 
-        Ok(())
+impl Hash for RawPattern {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.pattern.hash(state)
+    }
+}
+
+impl fmt::Display for RawPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.pattern.to_str().ok_or(fmt::Error {})?)
+    }
+}
+
+impl FromStr for RawPattern {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let pattern = RawPattern {
+            pattern: PathBuf::from(s),
+        };
+        Ok(pattern)
+    }
+}
+
+pub(crate) struct Pattern<'a> {
+    pattern: &'a Path,
+    paths: Vec<PathBuf>,
+    size: Option<u64>,
+}
+
+impl<'a> Pattern<'a> {
+    pub(crate) fn new(pattern: &'a Path, paths: Vec<PathBuf>) -> Self {
+        Self {
+            pattern,
+            paths,
+            size: None,
+        }
     }
 
-    pub fn insert(&self, path_tree: &mut PathTree) -> Result<()> {
+    pub(crate) fn filter_and_get_size(mut self, path_tree: &PathTree) -> Self {
+        let mut size = 0;
+        self.paths = self
+            .paths
+            .into_iter()
+            .filter_map(|path| path_tree.get_size_at(&path).map(|sz| (path, sz)))
+            .map(|(path, sz)| {
+                size += sz;
+                path
+            })
+            .collect();
+
+        self.size = size.into();
+        self
+    }
+
+    pub(crate) fn insert(&self, path_tree: &mut PathTree) {
         let start = Instant::now();
-        self.paths
-            .read()
-            .unwrap()
-            .as_ref()
-            .ok_or_else(|| anyhow!("no paths given"))?
-            .iter()
-            .for_each(|path| {
-                path_tree.insert(path);
-            });
+        self.paths.iter().for_each(|path| {
+            path_tree.insert(path);
+        });
 
         log::debug!(
             "pattern insert: {:?}, time: {:?}",
             self.pattern,
             Instant::elapsed(&start)
         );
-
-        Ok(())
     }
 
-    pub fn get_size(&self, path_tree: &PathTree) -> Option<u64> {
-        let mut num_files: u64 = 0;
-        let mut num_dirs: u64 = 0;
-
-        let start = Instant::now();
-
-        let size: u64 = self
-            .paths
-            .read()
-            .unwrap()
-            .as_ref()?
-            .iter()
-            .filter_map(|path| {
-                let size = path_tree.get_size_at(path);
-                if size.unwrap_or(0) > 0 {
-                    Self::count_files(path, &mut num_files, &mut num_dirs);
-                }
-                size
-            })
-            .sum();
-
-        log::debug!(
-            "pattern get_size: {:?}: {}, time: {:?}",
-            self.pattern,
-            size,
-            Instant::elapsed(&start)
-        );
-
-        let _ = self.size.lock().unwrap().insert(size);
-        *self.num_files.lock().unwrap() = num_files;
-        *self.num_dirs.lock().unwrap() = num_dirs;
-
-        Some(size)
+    pub(crate) fn is_empty(&self) -> bool {
+        self.size.map_or(true, |s| s == 0)
     }
 
-    pub fn get_size_cached(&self) -> Option<u64> {
-        *self.size.lock().unwrap()
+    pub(crate) fn get_size_cached(&self) -> Option<u64> {
+        self.size
     }
 
-    pub fn num_files(&self) -> u64 {
-        *self.num_files.lock().unwrap()
+    pub(crate) fn num_files(&self) -> usize {
+        self.paths.iter().filter(|p| p.is_file()).count()
     }
 
-    pub fn num_dirs(&self) -> u64 {
-        *self.num_dirs.lock().unwrap()
+    pub(crate) fn num_dirs(&self) -> usize {
+        self.paths.iter().filter(|p| p.is_dir()).count()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.num_files() + self.num_dirs() == 0
-    }
-
-    pub fn clean(&self, verbose_mode: bool) -> Result<()> {
-        for path in self.paths.read().unwrap().as_ref().unwrap() {
+    pub(crate) fn clean(&self, verbose_mode: bool) -> Result<()> {
+        for path in &self.paths {
             if path.is_dir() {
                 if let Err(err) = fs::remove_dir_all(path) {
                     log::warn!("failed to removed {:?}: {err}", path);
@@ -296,38 +286,14 @@ impl Pattern {
     }
 }
 
-impl Hash for Pattern {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.pattern.hash(state)
-    }
-}
-
-impl fmt::Display for Pattern {
+impl fmt::Display for Pattern<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.pattern.to_str().ok_or(fmt::Error {})?)
     }
 }
 
-impl FromStr for Pattern {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let pattern = Pattern {
-            pattern: PathBuf::from(s),
-            ..Pattern::default()
-        };
-        Ok(pattern)
-    }
-}
-
-impl AsRef<Path> for Pattern {
+impl AsRef<Path> for Pattern<'_> {
     fn as_ref(&self) -> &Path {
-        Path::new(&self.pattern)
-    }
-}
-
-impl From<String> for Pattern {
-    fn from(value: String) -> Self {
-        Self::new(PathBuf::from(value))
+        self.pattern
     }
 }
