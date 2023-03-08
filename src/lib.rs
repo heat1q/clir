@@ -39,6 +39,14 @@ pub fn run() -> Result<()> {
             ),
         )
         .arg(
+            Arg::new("config")
+                .help("Path to alternative config file.")
+                .short('c')
+                .action(clap::ArgAction::Set)
+                .default_value(".clir")
+                .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
             Arg::new("verbose")
                 .help("Run in verbose mode")
                 .short('v')
@@ -62,8 +70,9 @@ pub fn run() -> Result<()> {
 fn parse_args(app: &mut App, path: &Path) -> Result<()> {
     let app = app.get_matches_mut();
     let verbose_mode = *app.get_one::<bool>("verbose").unwrap_or(&false);
+    let config_path = app.get_one::<String>("config").unwrap();
 
-    let rules = Rules::new(".clir".as_ref())?;
+    let rules = Rules::new(config_path.as_ref())?;
     let mut cmd = Command::new(rules, path, verbose_mode);
 
     if *app.get_one::<bool>("run").unwrap() {
