@@ -53,6 +53,13 @@ pub fn run() -> Result<()> {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("absolute")
+                .help("Display absolute paths")
+                .short('a')
+                .long("absolute")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("run")
                 .help("Recursively clean all defined patterns")
                 .short('r')
@@ -70,10 +77,11 @@ pub fn run() -> Result<()> {
 fn parse_args(app: &mut App, path: &Path) -> Result<()> {
     let app = app.get_matches_mut();
     let verbose_mode = *app.get_one::<bool>("verbose").unwrap_or(&false);
+    let absolute_path = *app.get_one::<bool>("absolute").unwrap_or(&false);
     let config_path = app.get_one::<String>("config").unwrap();
 
     let rules = Rules::new(config_path.as_ref())?;
-    let mut cmd = Command::new(rules, path, verbose_mode);
+    let mut cmd = Command::new(rules, path, verbose_mode, absolute_path);
 
     if *app.get_one::<bool>("run").unwrap() {
         log::info!("run clean");

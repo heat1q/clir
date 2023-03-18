@@ -13,14 +13,21 @@ pub(crate) struct Command<'a> {
     rules: Rules<'a>,
     workdir: &'a Path,
     verbose_mode: bool,
+    absolute_path: bool,
 }
 
 impl<'a> Command<'a> {
-    pub(crate) fn new(rules: Rules<'a>, workdir: &'a Path, verbose_mode: bool) -> Command<'a> {
+    pub(crate) fn new(
+        rules: Rules<'a>,
+        workdir: &'a Path,
+        verbose_mode: bool,
+        absolute_path: bool,
+    ) -> Command<'a> {
         Command {
             rules,
             workdir,
             verbose_mode,
+            absolute_path,
         }
     }
 
@@ -35,7 +42,7 @@ impl<'a> Command<'a> {
     pub(crate) fn list(&self) -> Result<Vec<Pattern>> {
         let mut path_tree = PathTree::new();
         let patterns = self.rules.expand_patterns(&mut path_tree);
-        display::format_patterns(self.workdir, &path_tree, &patterns)?;
+        display::format_patterns(self.workdir, &path_tree, &patterns, self.absolute_path)?;
         Ok(patterns)
     }
 

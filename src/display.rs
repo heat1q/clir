@@ -1,152 +1,221 @@
 use crate::{path::PathTree, rules::Pattern};
-use anyhow::{Ok, Result};
+use anyhow::Result;
+use core::fmt;
 use io::Write;
-use std::{convert::TryInto, fmt::Display, io, path::Path};
+use std::{
+    convert::TryInto,
+    fmt::Display,
+    io, mem,
+    path::{Path, PathBuf},
+};
 
 pub(crate) fn format_patterns(
     workdir: &Path,
     path_tree: &PathTree,
     patterns: &[Pattern],
+    absolute_path: bool,
 ) -> Result<()> {
     let mut stdout = io::stdout();
-
     let total_size = path_tree.get_size().unwrap_or(0);
-    if total_size == 0 {
-        write_boxed(&mut stdout, "There is nothing to do :)")?;
-        return Ok(());
-    }
 
-    patterns
-        .iter()
-        .try_for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size))?;
+    let table = FormatTable::new(patterns, workdir, absolute_path, total_size);
 
-    let num_files = patterns.iter().map(|p| p.num_files()).sum();
-    let num_dirs = patterns.iter().map(|p| p.num_dirs()).sum();
-
-    let mut summary = String::with_capacity(2 << 7);
-    summary.push_str(&format!("[||||||||]  {}    ", SizeUnit::new(total_size)));
-    summary.push_str(&match (num_files, num_dirs) {
-        (0, _) => format!("{num_dirs} directory(ies) to be freed"),
-        (_, 0) => format!("{num_files} file(s) to be freed"),
-        (_, _) => format!("{num_files} file(s) and {num_dirs} directory(ies) to be freed"),
-    });
-
-    write_boxed(&mut stdout, &summary)?;
+    write!(stdout, "{table}")?;
     stdout.flush()?;
 
     Ok(())
 }
 
-fn write_pattern(
-    mut w: impl Write,
-    workdir: &Path,
-    pattern: &Pattern,
+const SCALE: i32 = 8;
+
+struct FormatTable<'a> {
+    entries: Vec<TableEntry<'a>>,
+    workdir: &'a Path,
+    absolute_path: bool,
     total_size: u64,
-) -> Result<()> {
-    const SCALE: i32 = 8;
-    let mut quota =
-        (pattern.get_size_cached().unwrap_or(0) as f64 / total_size as f64 * SCALE as f64) as i32;
-    quota = std::cmp::min(SCALE, quota + 1);
-    let used = "|".repeat(quota.try_into().unwrap_or(0));
-    let free = " ".repeat((SCALE - quota).try_into().unwrap_or(0));
-    writeln!(
-        w,
-        "  [{used}{free}]  {}    {} ({} , {} )",
-        SizeUnit::new(pattern.get_size_cached().unwrap_or(0)),
-        format_relative_path(workdir, pattern.as_ref()),
-        pattern.num_files(),
-        pattern.num_dirs(),
-    )?;
-    Ok(())
 }
 
-fn write_boxed<W: Write>(w: &'_ mut W, text: &str) -> Result<()> {
+impl<'a> FormatTable<'a> {
+    fn new(
+        patterns: &'a [Pattern],
+        workdir: &'a Path,
+        absolute_path: bool,
+        total_size: u64,
+    ) -> Self {
+        let entries = patterns
+            .iter()
+            .map(|p| TableEntry::from_pattern(p, total_size))
+            .collect();
+
+        Self {
+            entries,
+            workdir,
+            absolute_path,
+            total_size,
+        }
+    }
+
+    fn format_pattern(&self, pattern: &Pattern) -> PathBuf {
+        let path = pattern.as_ref();
+        if self.absolute_path {
+            return path.to_owned();
+        }
+
+        let index = self
+            .workdir
+            .components()
+            .zip(path.components())
+            .filter(|(a, b)| a == b)
+            .count();
+
+        // number of dirs to go up in relation to workdir
+        let num_dirs_up = self.workdir.components().count() - index;
+        if num_dirs_up > 2 {
+            // if the distance is to big, just return the absolute path
+            return path.into();
+        }
+
+        //let rel_path = (0..num_dirs_up).map(|_| "..").chain
+        let path = path
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i >= index)
+            .filter_map(|(_, p)| p.to_str());
+
+        (0..num_dirs_up).map(|_| "..").chain(path).collect()
+    }
+}
+
+impl Display for FormatTable<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.total_size == 0 {
+            write_boxed(f, "There is nothing to do :)")?;
+            return Ok(());
+        }
+
+        self.entries.iter().try_for_each(|entry| {
+            let used = "|".repeat(entry.quota.try_into().unwrap_or(0));
+            let free = " ".repeat((SCALE - entry.quota).try_into().unwrap_or(0));
+            writeln!(
+                f,
+                "  [{used}{free}]  {}    {} ({} , {} )",
+                SizeUnit::new(entry.pattern.get_size_cached().unwrap_or(0), true),
+                self.format_pattern(entry.pattern).to_string_lossy(),
+                entry.pattern.num_files(),
+                entry.pattern.num_dirs(),
+            )
+        })?;
+
+        let num_files = self.entries.iter().map(|e| e.pattern.num_files()).sum();
+        let num_dirs = self.entries.iter().map(|e| e.pattern.num_dirs()).sum();
+
+        let mut summary = String::with_capacity(2 << 7);
+        summary.push_str(&format!(
+            "[||||||||]  {}    ",
+            SizeUnit::new(self.total_size, true)
+        ));
+        summary.push_str(&match (num_files, num_dirs) {
+            (0, _) => format!("{num_dirs} directory(ies) to be freed"),
+            (_, 0) => format!("{num_files} file(s) to be freed"),
+            (_, _) => format!("{num_files} file(s) and {num_dirs} directory(ies) to be freed"),
+        });
+
+        write_boxed(f, &summary)
+    }
+}
+
+struct TableEntry<'a> {
+    pub pattern: &'a Pattern<'a>,
+    pub quota: i32,
+}
+
+impl<'a> TableEntry<'a> {
+    fn from_pattern(pattern: &'a Pattern, total_size: u64) -> Self {
+        let quota = (pattern.get_size_cached().unwrap_or(0) as f64 / total_size as f64
+            * SCALE as f64) as i32;
+        let quota = std::cmp::min(SCALE, quota + 1);
+
+        Self { pattern, quota }
+    }
+}
+
+fn write_boxed<W: fmt::Write>(w: &mut W, text: &str) -> fmt::Result {
     let width = text.len() + 2;
     let horizontal = "━".repeat(width);
     writeln!(w, "┏{horizontal}┓")?;
     writeln!(w, "┃ {text} ┃")?;
-    writeln!(w, "┗{horizontal}┛")?;
-    Ok(())
+    writeln!(w, "┗{horizontal}┛")
 }
 
-fn format_relative_path(workdir: &Path, pattern: &Path) -> String {
-    let path: Vec<&str> = pattern
-        .as_os_str()
-        .to_str()
-        .unwrap_or("")
-        .split('/')
-        .filter(|p| !p.is_empty())
-        .collect();
-    let workdir = workdir
-        .to_str()
-        .unwrap()
-        .split('/')
-        .filter(|p| !p.is_empty());
+#[repr(u8)]
+enum SizeUnitRaw {
+    None = 0,
+    Kilo,
+    Mega,
+    Giga,
+    Tera,
+}
 
-    let index = workdir.clone().zip(&path).filter(|&(a, b)| &a == b).count();
-
-    // number of dirs to go up in relation to workdir
-    let num_dirs_up = workdir.count() - index;
-    if num_dirs_up > 2 {
-        // if the distance is to big, just return the absolute path
-        return pattern.as_os_str().to_str().unwrap_or("").into();
+impl Display for SizeUnitRaw {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => Ok(()),
+            Self::Kilo => write!(f, "K"),
+            Self::Mega => write!(f, "M"),
+            Self::Giga => write!(f, "G"),
+            Self::Tera => write!(f, "T"),
+        }
     }
-
-    let mut rel_path: Vec<&str> = (0..num_dirs_up).map(|_| "..").collect();
-    path.iter()
-        .enumerate()
-        .filter(|&(i, _)| i >= index)
-        .for_each(|(_, p)| rel_path.push(p));
-
-    rel_path.join("/")
 }
 
-pub(crate) enum SizeUnit {
-    None(u64),
-    Kilo(u64),
-    Mega(u64),
-    Giga(u64),
-    Tera(u64),
+struct SizeUnit {
+    val: u64,
+    unit: SizeUnitRaw,
+    base2: bool,
 }
 
 impl SizeUnit {
-    pub(crate) fn new(size: u64) -> Self {
-        let mut i = 0;
-        let mut sz = size;
-        while sz > 0 {
-            sz /= 1_000;
+    pub(crate) fn new(val: u64, base2: bool) -> Self {
+        let base = if base2 { 1024 } else { 1000 };
+        let mut i: u8 = 0;
+        let mut v = val;
+        loop {
+            if v / base == 0 {
+                break;
+            }
+            v /= base;
             i += 1;
         }
 
-        match i - 1 {
-            1 => Self::Kilo(size),
-            2 => Self::Mega(size),
-            3 => Self::Giga(size),
-            4 => Self::Tera(size),
-            _ => Self::None(size),
-        }
-    }
-
-    fn format(&self, unit: &str, size: u64) -> String {
-        if size < 10 && unit != "B" {
-            format!("{:.2}{unit}", size as f64)
-        } else if size < 100 && unit != "B" {
-            format!("{:.1}{unit}", size as f64)
-        } else {
-            format!("{size}{unit}")
+        Self {
+            base2,
+            val: v,
+            unit: match i {
+                1 => SizeUnitRaw::Kilo,
+                2 => SizeUnitRaw::Mega,
+                3 => SizeUnitRaw::Giga,
+                5 => SizeUnitRaw::Tera,
+                _ => SizeUnitRaw::None,
+            },
         }
     }
 }
 
 impl Display for SizeUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let fmt_str = match *self {
-            Self::None(sz) => self.format("B", sz),
-            Self::Kilo(sz) => self.format("K", sz / 1_000),
-            Self::Mega(sz) => self.format("M", sz / 1_000_000),
-            Self::Giga(sz) => self.format("G", sz / 1_000_000_000),
-            Self::Tera(sz) => self.format("T", sz / 1_000_000_000_000),
-        };
-        write!(f, "{fmt_str}")
+        let val = self.val;
+        let unit = &self.unit;
+        if let SizeUnitRaw::None = self.unit {
+            return write!(f, "{val}B");
+        }
+        let i = if self.base2 { "i" } else { "" };
+
+        if val < 10 {
+            write!(f, "{:.2}{unit}{i}B", val as f64)
+        } else if val < 100 {
+            write!(f, "{:.1}{unit}{i}B", val as f64)
+        } else {
+            return write!(f, "{val}{unit}{i}B");
+        }
     }
 }
