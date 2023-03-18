@@ -1,41 +1,27 @@
 use crate::{path::PathTree, rules::Pattern};
 use anyhow::{Ok, Result};
 use io::Write;
-use rayon::prelude::*;
-use std::{cell::RefCell, convert::TryInto, fmt::Display, io, path::Path};
+use std::{convert::TryInto, fmt::Display, io, path::Path};
 
-pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
+pub(crate) fn format_patterns(
+    workdir: &Path,
+    path_tree: &PathTree,
+    patterns: &[Pattern],
+) -> Result<()> {
     let mut stdout = io::stdout();
 
-    let path_tree = RefCell::new(PathTree::new());
-    patterns.iter().for_each(|pattern| {
-        // insert pattern into path tree
-        pattern.insert(&path_tree);
-    });
-
-    // get the size of the individual patterns
-    // after all path are inserted into the tree
-    patterns.iter().for_each(|pattern| {
-        pattern.get_size(&path_tree.borrow());
-    });
-
-    let total_size = path_tree.borrow().get_size().unwrap_or(0);
+    let total_size = path_tree.get_size().unwrap_or(0);
     if total_size == 0 {
-        write_boxed(&mut stdout, "There is nothing to do :)").unwrap();
-        return;
+        write_boxed(&mut stdout, "There is nothing to do :)")?;
+        return Ok(());
     }
 
-    let mut patterns: Vec<&Pattern> = patterns
-        .into_iter()
-        .filter(|pattern| !pattern.is_empty())
-        .collect();
-    patterns.par_sort_by_cached_key(|k| k.get_size_cached());
     patterns
         .iter()
-        .for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size).unwrap());
+        .try_for_each(|pattern| write_pattern(&mut stdout, workdir, pattern, total_size))?;
 
-    let num_files: u64 = patterns.par_iter().map(|p| p.num_files()).sum();
-    let num_dirs: u64 = patterns.par_iter().map(|p| p.num_dirs()).sum();
+    let num_files = patterns.iter().map(|p| p.num_files()).sum();
+    let num_dirs = patterns.iter().map(|p| p.num_dirs()).sum();
 
     let mut summary = String::with_capacity(2 << 7);
     summary.push_str(&format!("[||||||||]  {}    ", SizeUnit::new(total_size)));
@@ -45,8 +31,10 @@ pub fn format_patterns(workdir: &Path, patterns: Vec<&Pattern>) {
         (_, _) => format!("{num_files} file(s) and {num_dirs} directory(ies) to be freed"),
     });
 
-    write_boxed(&mut stdout, &summary).unwrap();
-    stdout.flush().unwrap();
+    write_boxed(&mut stdout, &summary)?;
+    stdout.flush()?;
+
+    Ok(())
 }
 
 fn write_pattern(
@@ -65,7 +53,7 @@ fn write_pattern(
         w,
         "  [{used}{free}]  {}    {} ({} , {} )",
         SizeUnit::new(pattern.get_size_cached().unwrap_or(0)),
-        format_relative_path(workdir, pattern),
+        format_relative_path(workdir, pattern.as_ref()),
         pattern.num_files(),
         pattern.num_dirs(),
     )?;
@@ -81,9 +69,14 @@ fn write_boxed<W: Write>(w: &'_ mut W, text: &str) -> Result<()> {
     Ok(())
 }
 
-fn format_relative_path(workdir: &Path, pattern: &Pattern) -> String {
-    let path = pattern.to_string();
-    let path: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+fn format_relative_path(workdir: &Path, pattern: &Path) -> String {
+    let path: Vec<&str> = pattern
+        .as_os_str()
+        .to_str()
+        .unwrap_or("")
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .collect();
     let workdir = workdir
         .to_str()
         .unwrap()
@@ -96,7 +89,7 @@ fn format_relative_path(workdir: &Path, pattern: &Pattern) -> String {
     let num_dirs_up = workdir.count() - index;
     if num_dirs_up > 2 {
         // if the distance is to big, just return the absolute path
-        return pattern.to_string();
+        return pattern.as_os_str().to_str().unwrap_or("").into();
     }
 
     let mut rel_path: Vec<&str> = (0..num_dirs_up).map(|_| "..").collect();
@@ -108,7 +101,7 @@ fn format_relative_path(workdir: &Path, pattern: &Pattern) -> String {
     rel_path.join("/")
 }
 
-pub enum SizeUnit {
+pub(crate) enum SizeUnit {
     None(u64),
     Kilo(u64),
     Mega(u64),
@@ -117,7 +110,7 @@ pub enum SizeUnit {
 }
 
 impl SizeUnit {
-    pub fn new(size: u64) -> Self {
+    pub(crate) fn new(size: u64) -> Self {
         let mut i = 0;
         let mut sz = size;
         while sz > 0 {

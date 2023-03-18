@@ -2,17 +2,16 @@ use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs::{self, Metadata},
-    path::Path,
+    path::{Component, Path, PathBuf},
 };
-use walkdir::WalkDir;
 
 #[derive(Debug)]
-pub struct PathTree<'a> {
-    children: HashMap<&'a Path, PathTree<'a>>,
+pub struct PathTree {
+    children: HashMap<PathBuf, PathTree>,
     size: Option<u64>,
 }
 
-impl<'a> PathTree<'a> {
+impl PathTree {
     pub fn new() -> Self {
         Self::with_capacity(0)
     }
@@ -30,25 +29,22 @@ impl<'a> PathTree<'a> {
     /// Considers two scenarios:
     /// 1. Ingores paths for which a parent path is already in the tree.
     /// 2. Removes all children if a parent path is inserted.
-    pub fn insert(&mut self, path: &'a Path) -> Option<u64> {
+    pub fn insert(&mut self, path: &Path) -> Option<u64> {
         let calc_size = || get_path_size_par(path, None);
         self.insert_with(path, calc_size)
     }
 
-    pub fn insert_with<F: Fn() -> u64>(&mut self, path: &'a Path, calc_size: F) -> Option<u64> {
+    pub fn insert_with<F: Fn() -> u64>(&mut self, path: &Path, calc_size: F) -> Option<u64> {
         // path: /tmp/a
-        let first = match path.iter().next() {
-            Some(first) => first,
-            None => {
-                // if the sub path is empty, then this node is a leaf
-                // and we calc the size
-                let size = calc_size();
-                let diff = size - self.size.unwrap_or(0);
-                self.size = Some(size);
-                self.children.clear();
-                // return the diff in size when the node is updated
-                return Some(diff);
-            }
+        let Some(first) = path.iter().next() else {
+            // if the sub path is empty, then this node is a leaf
+            // and we calc the size
+            let size = calc_size();
+            let diff = size - self.size.unwrap_or(0);
+            self.size = Some(size);
+            self.children.clear();
+            // return the diff in size when the node is updated
+            return Some(diff);
         };
 
         // never add children to leafs
@@ -59,7 +55,7 @@ impl<'a> PathTree<'a> {
         let sub_path = path.strip_prefix(first).unwrap(); // tmp/a
         let child_size = self
             .children
-            .entry(first.as_ref())
+            .entry(PathBuf::from(first))
             .or_insert_with(|| PathTree::with_capacity(1))
             .insert_with(sub_path, calc_size);
 
@@ -77,24 +73,33 @@ impl<'a> PathTree<'a> {
     }
 
     fn traverse_tree<P: AsRef<Path>>(&self, path: P) -> Option<&Self> {
-        let first = match path.as_ref().iter().next() {
-            Some(first) => first,
-            None => {
-                // if the path is empty, then this node is a leaf
-                return Some(self);
-            }
+        let Some(first) = path.as_ref().iter().next() else {
+            // if the path is empty, then this node is a leaf
+            return Some(self);
         };
 
-        match self.children.get(Path::new(first)) {
-            Some(child_tree) => {
-                child_tree.traverse_tree(path.as_ref().strip_prefix(first).unwrap().as_os_str())
-            }
-            _ => None,
-        }
+        self.children
+            .get(Path::new(first))
+            .and_then(|p| p.traverse_tree(path.as_ref().strip_prefix(first).ok()?.as_os_str()))
+    }
+
+    pub fn contains_parent<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.traverse_tree(path).is_some()
     }
 
     pub fn contains_subpath<P: AsRef<Path>>(&self, subpath: P) -> bool {
-        self.traverse_tree(subpath).is_some()
+        let Some(subpath) = canonicalize(subpath) else {
+            return false;
+        };
+        let mut tree = self;
+        for p in subpath.iter() {
+            let Some(t) = tree.children.get(Path::new(p)) else {
+                return tree.is_leaf();
+            };
+            tree = t;
+        }
+
+        tree.is_leaf()
     }
 
     pub fn get_size(&self) -> Option<u64> {
@@ -106,15 +111,7 @@ impl<'a> PathTree<'a> {
     }
 }
 
-fn get_path_size<P: AsRef<Path>>(path: P) -> u64 {
-    WalkDir::new(path)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.metadata().unwrap().len())
-        .sum()
-}
-
-fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
+pub(super) fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
     let Some(meta) = meta.or_else(|| fs::metadata(&path).ok()) else {
         return 0;
     };
@@ -136,10 +133,39 @@ fn get_path_size_par<P: AsRef<Path>>(path: P, meta: Option<Metadata>) -> u64 {
     0
 }
 
+pub(super) fn canonicalize<P: AsRef<Path>>(path: P) -> Option<PathBuf> {
+    let path = path.as_ref();
+    let mut components: Vec<Component> = vec![];
+
+    if !matches!(path.components().peekable().peek()?, Component::RootDir) {
+        return None;
+    }
+
+    for c in path.components() {
+        if matches!(c, Component::ParentDir) {
+            components.pop()?;
+            continue;
+        }
+        components.push(c)
+    }
+
+    Some(components.iter().map(|c| c.as_os_str()).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::PathTree;
-    use std::path::Path;
+    use crate::path::canonicalize;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn canonicalize_glob() {
+        assert_eq!(canonicalize("/tmp/..").unwrap(), PathBuf::from("/"));
+        assert_eq!(
+            canonicalize("/tmp//a/./../*.rs").unwrap(),
+            PathBuf::from("/tmp/*.rs")
+        );
+    }
 
     #[test]
     fn insert_and_get() {
@@ -152,14 +178,25 @@ mod tests {
     #[test]
     fn contains_subpath() {
         let mut path_tree = PathTree::new();
+        path_tree.insert_with(Path::new("/tmp/a"), || 1);
+
+        assert!(!path_tree.contains_subpath("/tmp"));
+        assert!(path_tree.contains_subpath("/tmp/a"));
+        assert!(path_tree.contains_subpath("/tmp/a/"));
+        assert!(path_tree.contains_subpath("/tmp/a/c/**/*.rs"));
+    }
+
+    #[test]
+    fn contains_parent() {
+        let mut path_tree = PathTree::new();
         path_tree.insert(Path::new("/tmp/a/b"));
 
-        assert!(path_tree.contains_subpath("/"));
-        assert!(path_tree.contains_subpath("/tmp"));
-        assert!(path_tree.contains_subpath("/tmp/a"));
-        assert!(path_tree.contains_subpath("/tmp/a/b"));
-        assert!(!path_tree.contains_subpath("/tmp/a/c"));
-        assert!(!path_tree.contains_subpath("tmp/a/b"));
+        assert!(path_tree.contains_parent("/"));
+        assert!(path_tree.contains_parent("/tmp"));
+        assert!(path_tree.contains_parent("/tmp/a"));
+        assert!(path_tree.contains_parent("/tmp/a/b"));
+        assert!(!path_tree.contains_parent("/tmp/a/c"));
+        assert!(!path_tree.contains_parent("tmp/a/b"));
     }
 
     #[test]

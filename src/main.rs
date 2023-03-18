@@ -4,7 +4,7 @@ use clir::run;
 
 fn main() {
     if let Err(e) = run() {
-        println!("error: {}", e);
+        eprintln!("error: {:#}", e);
         process::exit(1);
     }
 }
