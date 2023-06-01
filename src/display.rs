@@ -5,7 +5,7 @@ use io::Write;
 use std::{
     convert::TryInto,
     fmt::Display,
-    io, mem,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -71,11 +71,10 @@ impl<'a> FormatTable<'a> {
 
         let mut column_widths = vec![0usize; 5];
         for entry in self.entries.iter().chain(summary.iter()) {
-            entry
-                .row
-                .iter()
-                .enumerate()
-                .for_each(|(i, c)| column_widths[i] = column_widths[i].max(c.chars().count()))
+            entry.row.iter().enumerate().for_each(|(i, c)| {
+                let chars_count = c.as_ref().map(|s| s.chars().count()).unwrap_or(0);
+                column_widths[i] = column_widths[i].max(chars_count);
+            })
         }
 
         for entry in &self.entries {
@@ -93,7 +92,7 @@ impl<'a> FormatTable<'a> {
 }
 
 struct TableEntry {
-    pub row: [String; 5],
+    pub row: [Option<String>; 5],
 }
 
 impl TableEntry {
@@ -109,14 +108,15 @@ impl TableEntry {
         let used = "|".repeat(quota.try_into().unwrap_or(0));
         let free = " ".repeat((SCALE - quota).try_into().unwrap_or(0));
 
-        let row: [String; 5] = [
-            format!("[{used}{free}]"),
-            SizeUnit::new(pattern.get_size_cached().unwrap_or(0), true).to_string(), //TODO: size unit
-            Self::format_dirs(pattern.num_dirs()).unwrap_or("".to_owned()),
-            Self::format_files(pattern.num_files()).unwrap_or("".to_owned()),
-            format!(
-                "{}",
-                format_pattern(pattern, workdir, absolute_path).to_string_lossy()
+        let row: [Option<String>; 5] = [
+            Some(format!("[{used}{free}]")),
+            Some(SizeUnit::new(pattern.get_size_cached().unwrap_or(0), true).to_string()), //TODO: size unit
+            Self::format_dirs(pattern.num_dirs()),
+            Self::format_files(pattern.num_files()),
+            Some(
+                format_pattern(pattern, workdir, absolute_path)
+                    .to_string_lossy()
+                    .to_string(),
             ),
         ];
 
@@ -126,19 +126,29 @@ impl TableEntry {
     fn summary(total_size: u64, num_files: usize, num_dirs: usize) -> Self {
         Self {
             row: [
-                "[||||||||]".to_owned(),
-                SizeUnit::new(total_size, true).to_string(),
-                Self::format_dirs(num_dirs).unwrap_or("".to_owned()),
-                Self::format_files(num_files).unwrap_or("".to_owned()),
-                "Files and directories to be removed".to_owned(),
+                Some("[||||||||]".to_owned()),
+                Some(SizeUnit::new(total_size, true).to_string()),
+                Self::format_dirs(num_dirs),
+                Self::format_files(num_files),
+                Some("Files and directories to be removed".to_owned()),
             ],
         }
     }
 
     fn format(&self, w: &mut impl io::Write, column_widths: &[usize]) -> io::Result<()> {
-        for (i, c) in self.row.iter().enumerate() {
-            let padding = " ".repeat(column_widths[i] - c.chars().count() + 2usize);
-            write!(w, "{c}{padding}")?;
+        const PADDING: usize = 2;
+        for (i, col) in self.row.iter().enumerate() {
+            match col {
+                Some(col) => {
+                    let padding = " ".repeat(column_widths[i] - col.chars().count() + PADDING);
+                    write!(w, "{col}{padding}")
+                }
+                None if column_widths[i] > 0 => {
+                    let padding = " ".repeat(column_widths[i] + PADDING);
+                    write!(w, "{padding}")
+                }
+                _ => Ok(()),
+            }?;
         }
         Ok(())
     }
