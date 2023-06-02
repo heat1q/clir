@@ -16,55 +16,57 @@ fn create_config_if_not_found() {
 
 #[test]
 fn list_patterns() -> anyhow::Result<()> {
-    let _files = mocks::MockFiles::new()
-        .add_config("/tmp/.clir", vec!["/tmp/clir/test_files".to_owned()])?
-        .add_dir("/tmp/clir/test_files")?
-        .add_dir("/tmp/clir/test_files/c")?
-        .add_dir("/tmp/clir/test_files/d")?
-        .add_file("/tmp/clir/test_files/a.tmp", 1024)?
-        .add_file("/tmp/clir/test_files/b.tmp", 1024)?
-        .add_file("/tmp/clir/test_files/c/e.tmp", 1024)?
-        .add_file("/tmp/clir/test_files/d/f.tmp", 1024);
+    let mocks = mocks::MockFiles::new()
+        .add_config(".clir", vec!["test_files".to_owned()])?
+        .add_dir("test_files")?
+        .add_dir("test_files/c")?
+        .add_dir("test_files/d")?
+        .add_file("test_files/a.tmp", 1024)?
+        .add_file("test_files/b.tmp", 1024)?
+        .add_file("test_files/c/e.tmp", 1024)?
+        .add_file("test_files/d/f.tmp", 1024)?;
 
     let mut cmd = Command::cargo_bin("clir").unwrap();
 
-    cmd.arg("-c").arg("/tmp/.clir");
+    println!("{:?}", mocks.config_path());
+    cmd.arg("-c").arg(mocks.config_path());
     let output = cmd.assert().success();
     let output = &output.get_output().stdout;
     let parser = OutputParser::from_stdout(output);
+    println!("{parser:?}");
 
-    assert_pattern!(parser, "/tmp/clir/test_files", "4.00K");
-    assert_pattern_at!(parser, 0, "/tmp/clir/test_files");
-    assert_pattern_summary!(parser, "4.00K");
+    assert_pattern_entries!(
+        parser,
+        [("test_files", "4.00KiB", num_dirs = 1, num_files = 0)],
+    );
+    assert_pattern_summary!(parser, "4.00KiB", num_dirs = 1, num_files = 0);
 
     Ok(())
 }
 
 #[test]
 fn overlapping_patterns() -> anyhow::Result<()> {
-    let _files = mocks::MockFiles::new()
+    let mocks = mocks::MockFiles::new()
         .add_config(
-            "/tmp/.clir",
-            vec![
-                "/tmp/clir/test_files/**/*.tmp".to_owned(),
-                "/tmp/clir/test_files".to_owned(),
-            ],
+            ".clir",
+            vec!["test_files/**/*.tmp".to_owned(), "test_files".to_owned()],
         )?
-        .add_dir("/tmp/clir/test_files")?
-        .add_file("/tmp/clir/test_files/a.tmp", 1024)?
-        .add_file("/tmp/clir/test_files/b.tmp", 1024)?;
+        .add_dir("test_files")?
+        .add_file("test_files/a.tmp", 1024)?
+        .add_file("test_files/b.tmp", 1024)?;
 
     let mut cmd = Command::cargo_bin("clir").unwrap();
 
-    cmd.arg("-c").arg("/tmp/.clir");
+    cmd.arg("-c").arg(mocks.config_path());
     let output = cmd.assert().success();
     let output = &output.get_output().stdout;
     let parser = OutputParser::from_stdout(output);
 
-    assert_pattern!(parser, "/tmp/clir/test_files", "2.00K");
-    assert_pattern_at!(parser, 0, "/tmp/clir/test_files");
-    assert_pattern_at!(parser, 1, None);
-    assert_pattern_summary!(parser, "2.00K");
+    assert_pattern_entries!(
+        parser,
+        [("test_files", "2.00KiB", num_dirs = 1, num_files = 0)],
+    );
+    assert_pattern_summary!(parser, "2.00KiB", num_dirs = 1, num_files = 0);
 
     Ok(())
 }

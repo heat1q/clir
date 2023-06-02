@@ -12,21 +12,14 @@ use crate::rules::{Pattern, Rules};
 pub(crate) struct Command<'a> {
     rules: Rules<'a>,
     workdir: &'a Path,
-    verbose_mode: bool,
     absolute_path: bool,
 }
 
 impl<'a> Command<'a> {
-    pub(crate) fn new(
-        rules: Rules<'a>,
-        workdir: &'a Path,
-        verbose_mode: bool,
-        absolute_path: bool,
-    ) -> Command<'a> {
+    pub(crate) fn new(rules: Rules<'a>, workdir: &'a Path, absolute_path: bool) -> Command<'a> {
         Command {
             rules,
             workdir,
-            verbose_mode,
             absolute_path,
         }
     }
@@ -53,10 +46,12 @@ impl<'a> Command<'a> {
 
         let mut confirm = "".to_owned();
         stdin().read_line(&mut confirm)?;
+        let confirm = confirm.to_ascii_lowercase();
+        let confirm = confirm.as_bytes();
 
-        if confirm.starts_with('y') || confirm.starts_with('Y') {
+        if &confirm[..1] == b"y" || &confirm[..2] == b"yes" {
             let start = time::Instant::now();
-            self.rules.clean(&patterns, self.verbose_mode)?;
+            self.rules.clean(&patterns)?;
             let elapsed = start.elapsed().as_millis();
             println!("Finished in {:.2}s", (elapsed as f64) / 1000.);
         } else {

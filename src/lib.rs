@@ -2,6 +2,7 @@ use crate::cmd::Command;
 use crate::rules::Rules;
 use anyhow::{anyhow, Ok, Result};
 use clap::{App, Arg};
+use simple_logger::SimpleLogger;
 use std::{env, path::Path};
 
 mod cmd;
@@ -10,12 +11,7 @@ mod path;
 mod rules;
 
 pub fn run() -> Result<()> {
-    #[cfg(feature = "env_logger")]
-    env_logger::init();
-
     let current_dir = env::current_dir()?;
-    log::info!("working dir: {}", current_dir.display());
-
     let mut app = App::new("clir")
         .about("A command line cleaning utility.")
         .subcommand(
@@ -50,7 +46,7 @@ pub fn run() -> Result<()> {
             Arg::new("verbose")
                 .help("Run in verbose mode")
                 .short('v')
-                .action(clap::ArgAction::SetTrue),
+                .action(clap::ArgAction::Count),
         )
         .arg(
             Arg::new("absolute")
@@ -74,17 +70,19 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn parse_args(app: &mut App, path: &Path) -> Result<()> {
+fn parse_args(app: &mut App, current_dir: &Path) -> Result<()> {
     let app = app.get_matches_mut();
-    let verbose_mode = *app.get_one::<bool>("verbose").unwrap_or(&false);
+    let verbosity_level = *app.get_one::<u8>("verbose").unwrap_or(&0);
     let absolute_path = *app.get_one::<bool>("absolute").unwrap_or(&false);
     let config_path = app.get_one::<String>("config").unwrap();
 
+    setup_logger(verbosity_level);
+    log::trace!("working dir: {}", current_dir.display());
+
     let rules = Rules::new(config_path.as_ref())?;
-    let mut cmd = Command::new(rules, path, verbose_mode, absolute_path);
+    let mut cmd = Command::new(rules, current_dir, absolute_path);
 
     if *app.get_one::<bool>("run").unwrap() {
-        log::info!("run clean");
         return cmd.clean();
     }
 
@@ -105,4 +103,14 @@ fn parse_args(app: &mut App, path: &Path) -> Result<()> {
         }
         _ => cmd.list().map(|_| ()),
     }
+}
+
+fn setup_logger(verbosity_level: u8) {
+    let level_filter = match verbosity_level {
+        1 => log::LevelFilter::Warn,
+        2 => log::LevelFilter::Info,
+        3 => log::LevelFilter::Trace,
+        _ => log::LevelFilter::Error,
+    };
+    SimpleLogger::new().with_level(level_filter).init().unwrap();
 }

@@ -131,11 +131,8 @@ impl<'a> Rules<'a> {
         patterns
     }
 
-    pub(crate) fn clean(&self, patterns: &Vec<Pattern>, verbose_mode: bool) -> Result<()> {
-        let _n = patterns
-            .par_iter()
-            .filter_map(|p| p.clean(verbose_mode).ok())
-            .count();
+    pub(crate) fn clean(&self, patterns: &Vec<Pattern>) -> Result<()> {
+        let _n = patterns.par_iter().filter_map(|p| p.clean().ok()).count();
 
         Ok(())
     }
@@ -168,7 +165,7 @@ impl RawPattern {
             .filter_map(|path| fs::canonicalize(path).ok())
             .collect();
 
-        log::debug!(
+        log::trace!(
             "new pattern {:?}: num_paths: {}, time: {:?}",
             self.pattern,
             paths.len(),
@@ -239,7 +236,7 @@ impl<'a> Pattern<'a> {
             path_tree.insert(path);
         });
 
-        log::debug!(
+        log::trace!(
             "pattern insert: {:?}, time: {:?}",
             self.pattern,
             Instant::elapsed(&start)
@@ -262,25 +259,24 @@ impl<'a> Pattern<'a> {
         self.paths.iter().filter(|p| p.is_dir()).count()
     }
 
-    pub(crate) fn clean(&self, verbose_mode: bool) -> Result<()> {
+    pub(crate) fn clean(&self) -> Result<()> {
         for path in &self.paths {
             if path.is_dir() {
                 if let Err(err) = fs::remove_dir_all(path) {
-                    log::warn!("failed to removed {:?}: {err}", path);
+                    log::warn!("failed to remove directory {path:?}: {err}");
+                    continue;
                 }
-                log::info!("removed dir {:?}", path);
-                continue;
-            }
-            if let Err(err) = fs::remove_file(path) {
-                log::warn!("failed to removed file {:?}: {err}", path);
-            }
-
-            if verbose_mode {
-                println!("deleted {}", path.to_str().unwrap_or(""));
+                log::info!("removed directory {path:?}");
+            } else {
+                if let Err(err) = fs::remove_file(path) {
+                    log::warn!("failed to remove file {path:?}: {err}");
+                    continue;
+                }
+                log::info!("removed file {path:?}");
             }
         }
 
-        log::info!("cleaned pattern {self}");
+        log::trace!("cleaned pattern {self}");
 
         Ok(())
     }
