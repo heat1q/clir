@@ -1,4 +1,5 @@
 use crate::{path::PathTree, rules::Pattern};
+use ansi_term::{ANSIString, Style};
 use anyhow::Result;
 use core::fmt;
 use io::Write;
@@ -27,37 +28,32 @@ pub(crate) fn format_patterns(
 }
 
 const SCALE: i32 = 8;
+const NUM_TABLE_COLUMS: usize = 5;
 
-struct FormatTable<'a> {
+struct FormatTable {
     entries: Vec<TableEntry>,
-    workdir: &'a Path,
-    absolute_path: bool,
     total_size: u64,
-    num_files: usize,
-    num_dirs: usize,
 }
 
-impl<'a> FormatTable<'a> {
-    fn new(
-        patterns: &'a [Pattern],
-        workdir: &'a Path,
-        absolute_path: bool,
-        total_size: u64,
-    ) -> Self {
-        let entries = patterns
-            .iter()
-            .map(|p| TableEntry::from_pattern(p, total_size, workdir, absolute_path))
-            .collect();
+impl FormatTable {
+    fn new(patterns: &[Pattern], workdir: &Path, absolute_path: bool, total_size: u64) -> Self {
         let num_files = patterns.iter().map(|p| p.num_files()).sum();
         let num_dirs = patterns.iter().map(|p| p.num_dirs()).sum();
 
+        let mut entries: Vec<TableEntry> = Vec::with_capacity(patterns.len() + 2);
+        entries.push(TableEntry::heading());
+
+        patterns.iter().for_each(|p| {
+            let entry = TableEntry::from_pattern(p, total_size, workdir, absolute_path);
+            entries.push(entry)
+        });
+
+        let summary = TableEntry::summary(total_size, num_files, num_dirs);
+        entries.push(summary);
+
         Self {
             entries,
-            workdir,
-            absolute_path,
             total_size,
-            num_files,
-            num_dirs,
         }
     }
 
@@ -66,33 +62,35 @@ impl<'a> FormatTable<'a> {
             write_boxed(w, "There is nothing to do :)")?;
             return Ok(());
         }
-        let summary = TableEntry::summary(self.total_size, self.num_files, self.num_dirs);
-        let summary = [summary];
 
-        let mut column_widths = vec![0usize; 5];
-        for entry in self.entries.iter().chain(summary.iter()) {
+        let mut column_widths = vec![0usize; NUM_TABLE_COLUMS];
+        for entry in self.entries.iter() {
             entry.row.iter().enumerate().for_each(|(i, c)| {
                 let chars_count = c.as_ref().map(|s| s.chars().count()).unwrap_or(0);
                 column_widths[i] = column_widths[i].max(chars_count);
             })
         }
 
-        for entry in &self.entries {
+        let [entries @ .., summary] = &self.entries[..] else {
+            unreachable!()
+        };
+
+        for entry in entries {
             write!(w, "  ")?;
             entry.format(w, &column_widths)?;
             writeln!(w)?;
         }
 
         let mut buf = Vec::new();
-        summary[0].format(&mut buf, &column_widths)?;
-        write_boxed(w, std::str::from_utf8(&buf).unwrap())?;
+        summary.format(&mut buf, &column_widths)?;
+        write_boxed(w, std::str::from_utf8(&buf).unwrap_or(""))?;
 
         Ok(())
     }
 }
 
 struct TableEntry {
-    pub row: [Option<String>; 5],
+    pub row: [Option<ANSIString<'static>>; NUM_TABLE_COLUMS],
 }
 
 impl TableEntry {
@@ -108,29 +106,46 @@ impl TableEntry {
         let used = "|".repeat(quota.try_into().unwrap_or(0));
         let free = " ".repeat((SCALE - quota).try_into().unwrap_or(0));
 
-        let row: [Option<String>; 5] = [
-            Some(format!("[{used}{free}]")),
-            Some(SizeUnit::new(pattern.get_size_cached().unwrap_or(0), true).to_string()), //TODO: size unit
-            Self::format_dirs(pattern.num_dirs()),
-            Self::format_files(pattern.num_files()),
+        let row: [Option<ANSIString<'_>>; 5] = [
+            Some(format!("[{used}{free}]").into()),
+            Some(
+                SizeUnit::new(pattern.get_size_cached().unwrap_or(0), true)
+                    .to_string()
+                    .into(),
+            ), //TODO: size unit
+            Self::format_dirs(pattern.num_dirs()).map(|s| s.into()),
+            Self::format_files(pattern.num_files()).map(|s| s.into()),
             Some(
                 format_pattern(pattern, workdir, absolute_path)
                     .to_string_lossy()
-                    .to_string(),
+                    .to_string()
+                    .into(),
             ),
         ];
 
         Self { row }
     }
 
+    fn heading() -> Self {
+        Self {
+            row: [
+                Some(Style::new().bold().paint("Share")),
+                Some(Style::new().bold().paint("Size")),
+                Some(Style::new().bold().paint("Dirs")),
+                Some(Style::new().bold().paint("Files")),
+                Some(Style::new().bold().paint("Path")),
+            ],
+        }
+    }
+
     fn summary(total_size: u64, num_files: usize, num_dirs: usize) -> Self {
         Self {
             row: [
-                Some("[||||||||]".to_owned()),
-                Some(SizeUnit::new(total_size, true).to_string()),
-                Self::format_dirs(num_dirs),
-                Self::format_files(num_files),
-                Some("Files and directories to be removed".to_owned()),
+                Some("[||||||||]".into()),
+                Some(SizeUnit::new(total_size, true).to_string().into()),
+                Self::format_dirs(num_dirs).map(|s| s.into()),
+                Self::format_files(num_files).map(|s| s.into()),
+                Some("files and directories can be removed".into()),
             ],
         }
     }
@@ -139,11 +154,14 @@ impl TableEntry {
         const PADDING: usize = 2;
         for (i, col) in self.row.iter().enumerate() {
             match col {
-                Some(col) => {
+                Some(col) if i < NUM_TABLE_COLUMS - 1 => {
                     let padding = " ".repeat(column_widths[i] - col.chars().count() + PADDING);
                     write!(w, "{col}{padding}")
                 }
-                None if column_widths[i] > 0 => {
+                Some(col) if i == NUM_TABLE_COLUMS - 1 => {
+                    write!(w, "{col}")
+                }
+                None if column_widths[i] > 0 && i < NUM_TABLE_COLUMS - 1 => {
                     let padding = " ".repeat(column_widths[i] + PADDING);
                     write!(w, "{padding}")
                 }
