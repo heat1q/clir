@@ -38,6 +38,7 @@ pub fn run() -> Result<()> {
             Arg::new("config")
                 .help("Path to alternative config file.")
                 .short('c')
+                .long("config")
                 .action(clap::ArgAction::Set)
                 .default_value(".clir")
                 .value_hint(clap::ValueHint::FilePath),
@@ -46,25 +47,28 @@ pub fn run() -> Result<()> {
             Arg::new("verbose")
                 .help("Run in verbose mode")
                 .short('v')
+                .long("verbose")
                 .action(clap::ArgAction::Count),
         )
         .arg(
             Arg::new("absolute")
                 .help("Display absolute paths")
                 .short('a')
-                .long("absolute")
+                .long("absolute-path")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("run")
                 .help("Recursively clean all defined patterns")
                 .short('r')
+                .long("run")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("confirm")
                 .help("Confirm cleaning all patterns")
                 .short('y')
+                .long("confirm")
                 .action(clap::ArgAction::SetTrue),
         );
 

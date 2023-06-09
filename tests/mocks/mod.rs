@@ -30,6 +30,10 @@ impl MockFiles {
         }
     }
 
+    pub fn test_dir(&self) -> &Path {
+        &self.test_dir
+    }
+
     pub fn config_path(&self) -> &Path {
         &self.config_path
     }
