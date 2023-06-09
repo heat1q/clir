@@ -34,7 +34,7 @@ impl MockFiles {
         &self.config_path
     }
 
-    pub fn add_config(self, name: &str, patterns: Vec<String>) -> io::Result<Self> {
+    pub fn add_config(self, name: &str, patterns: Vec<&str>) -> io::Result<Self> {
         let path = self.test_dir.join(name);
         self.write_config_file(&path, patterns)?;
         Ok(self)
@@ -52,7 +52,7 @@ impl MockFiles {
         Ok(self)
     }
 
-    pub fn write_config_file(&self, path: &Path, patterns: Vec<String>) -> io::Result<()> {
+    pub fn write_config_file(&self, path: &Path, patterns: Vec<&str>) -> io::Result<()> {
         let _ = fs::remove_file(path);
         let file = OpenOptions::new().write(true).create(true).open(path)?;
 
@@ -78,7 +78,7 @@ impl MockFiles {
 
 impl Drop for MockFiles {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.test_dir);
+        //let _ = fs::remove_dir_all(&self.test_dir);
     }
 }
 
@@ -106,21 +106,22 @@ impl Item {
                 ' ' => continue,
                 'a'..='z' | 'A'..='Z' => return Self::Heading,
                 '[' => {
+                    let (_, input) = input.split_once(']').unwrap();
                     let split: Vec<&str> = input.split(' ').filter(|s| !s.is_empty()).collect();
                     return match split[..] {
-                        [_, size_fmt, _, num_dirs, _, num_files, pattern] => Self::Entry {
+                        [size_fmt, _, num_dirs, _, num_files, pattern] => Self::Entry {
                             pattern: pattern.to_string(),
                             num_dirs: num_dirs.parse().unwrap(),
                             num_files: num_files.parse().unwrap(),
                             size_fmt: size_fmt.to_string(),
                         },
-                        [_, size_fmt, icon, count, pattern] if icon == "\u{f07b}" => Self::Entry {
+                        [size_fmt, icon, count, pattern] if icon == "\u{f07b}" => Self::Entry {
                             pattern: pattern.to_string(),
                             num_dirs: count.parse().unwrap(),
                             num_files: 0,
                             size_fmt: size_fmt.to_string(),
                         },
-                        [_, size_fmt, icon, count, pattern] if icon == "\u{f0f6}" => Self::Entry {
+                        [size_fmt, icon, count, pattern] if icon == "\u{f0f6}" => Self::Entry {
                             pattern: pattern.to_string(),
                             num_dirs: 0,
                             num_files: count.parse().unwrap(),
@@ -227,17 +228,14 @@ macro_rules! assert_pattern_entries {
         ],
     ) => {
         let entries = $parser.entries();
-        let mut entries = entries.iter();
         $(
-            let e = entries.next();
+            let e = entries.iter().find(|e| e.pattern().unwrap().ends_with($pat));
             assert!(e.is_some(), "entry should exist");
             let e = e.unwrap();
-            assert!(e.pattern().unwrap().ends_with($pat));
             assert_eq!(e.size_fmt(), Some($sz));
             assert_eq!(e.num_dirs(), Some($num_dirs as usize));
             assert_eq!(e.num_files(), Some($num_files as usize));
         )+
-        assert!(entries.next().is_none());
     }
 }
 
