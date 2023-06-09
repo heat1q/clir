@@ -60,6 +60,12 @@ pub fn run() -> Result<()> {
                 .help("Recursively clean all defined patterns")
                 .short('r')
                 .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("confirm")
+                .help("Confirm cleaning all patterns")
+                .short('y')
+                .action(clap::ArgAction::SetTrue),
         );
 
     if let Err(err) = parse_args(&mut app, &current_dir) {
@@ -82,8 +88,16 @@ fn parse_args(app: &mut App, current_dir: &Path) -> Result<()> {
     let rules = Rules::new(config_path.as_ref())?;
     let mut cmd = Command::new(rules, current_dir, absolute_path);
 
-    if *app.get_one::<bool>("run").unwrap() {
-        return cmd.clean();
+    let run = *app.get_one::<bool>("run").unwrap();
+    let confirm = *app.get_one::<bool>("confirm").unwrap();
+    match (run, confirm) {
+        (true, true) => {
+            return cmd.clean_all();
+        }
+        (true, false) => {
+            return cmd.clean_with_confirmation();
+        }
+        (_, _) => (),
     }
 
     match app.subcommand() {

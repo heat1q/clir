@@ -39,26 +39,44 @@ impl<'a> Command<'a> {
         Ok(patterns)
     }
 
-    pub(crate) fn clean(&self) -> Result<()> {
+    pub(crate) fn clean_with_confirmation(&self) -> Result<()> {
         let patterns = self.list()?;
+        if patterns.is_empty() {
+            return Ok(());
+        }
+
         print!("\nClean all selected paths? [(Y)es/(N)o]: ");
         stdout().lock().flush()?;
 
-        let mut confirm = "".to_owned();
+        let mut confirm = String::new();
         stdin().read_line(&mut confirm)?;
         let confirm = confirm.to_ascii_lowercase();
-        let confirm = confirm.as_bytes();
+        let confirm = confirm.trim();
 
-        if &confirm[..1] == b"y" || &confirm[..2] == b"yes" {
-            let start = time::Instant::now();
-            self.rules.clean(&patterns)?;
-            let elapsed = start.elapsed().as_millis();
-            println!("Finished in {:.2}s", (elapsed as f64) / 1000.);
+        if confirm == "y" || confirm == "yes" {
+            self.clean(&patterns)?;
         } else {
             println!("Aborting...");
         }
 
         Ok(())
+    }
+
+    fn clean(&self, patterns: &Vec<Pattern>) -> Result<()> {
+        let start = time::Instant::now();
+        self.rules.clean(patterns)?;
+        let elapsed = start.elapsed().as_millis();
+        println!("Finished in {:.2}s", (elapsed as f64) / 1000.);
+        Ok(())
+    }
+
+    pub(crate) fn clean_all(&self) -> Result<()> {
+        let patterns = self.list()?;
+        if patterns.is_empty() {
+            return Ok(());
+        }
+
+        self.clean(&patterns)
     }
 
     fn prefix_workdir(&self, rules: Vec<&String>) -> Result<Vec<String>> {
