@@ -2,6 +2,7 @@ use crate::cmd::Command;
 use crate::rules::Rules;
 use anyhow::{anyhow, Ok, Result};
 use clap::{App, Arg};
+use simple_logger::SimpleLogger;
 use std::{env, path::Path};
 
 mod cmd;
@@ -10,12 +11,10 @@ mod path;
 mod rules;
 
 pub fn run() -> Result<()> {
-    #[cfg(feature = "env_logger")]
-    env_logger::init();
-
+    let config_path = env::home_dir()
+        .ok_or_else(|| anyhow!("cannot find config file"))?
+        .join(".clir");
     let current_dir = env::current_dir()?;
-    log::info!("working dir: {}", current_dir.display());
-
     let mut app = App::new("clir")
         .about("A command line cleaning utility.")
         .subcommand(
@@ -42,20 +41,37 @@ pub fn run() -> Result<()> {
             Arg::new("config")
                 .help("Path to alternative config file.")
                 .short('c')
+                .long("config")
                 .action(clap::ArgAction::Set)
-                .default_value(".clir")
+                .default_value(config_path.to_str().unwrap())
                 .value_hint(clap::ValueHint::FilePath),
         )
         .arg(
             Arg::new("verbose")
                 .help("Run in verbose mode")
                 .short('v')
+                .long("verbose")
+                .action(clap::ArgAction::Count),
+        )
+        .arg(
+            Arg::new("absolute")
+                .help("Display absolute paths")
+                .short('a')
+                .long("absolute-path")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("run")
                 .help("Recursively clean all defined patterns")
                 .short('r')
+                .long("run")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("confirm")
+                .help("Confirm cleaning all patterns")
+                .short('y')
+                .long("confirm")
                 .action(clap::ArgAction::SetTrue),
         );
 
@@ -67,17 +83,28 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn parse_args(app: &mut App, path: &Path) -> Result<()> {
+fn parse_args(app: &mut App, current_dir: &Path) -> Result<()> {
     let app = app.get_matches_mut();
-    let verbose_mode = *app.get_one::<bool>("verbose").unwrap_or(&false);
+    let verbosity_level = *app.get_one::<u8>("verbose").unwrap_or(&0);
+    let absolute_path = *app.get_one::<bool>("absolute").unwrap_or(&false);
     let config_path = app.get_one::<String>("config").unwrap();
 
-    let rules = Rules::new(config_path.as_ref())?;
-    let mut cmd = Command::new(rules, path, verbose_mode);
+    setup_logger(verbosity_level);
+    log::trace!("working dir: {}", current_dir.display());
 
-    if *app.get_one::<bool>("run").unwrap() {
-        log::info!("run clean");
-        return cmd.clean();
+    let rules = Rules::new(config_path.as_ref())?;
+    let mut cmd = Command::new(rules, current_dir, absolute_path);
+
+    let run = *app.get_one::<bool>("run").unwrap();
+    let confirm = *app.get_one::<bool>("confirm").unwrap();
+    match (run, confirm) {
+        (true, true) => {
+            return cmd.clean_all();
+        }
+        (true, false) => {
+            return cmd.clean_with_confirmation();
+        }
+        (_, _) => (),
     }
 
     match app.subcommand() {
@@ -97,4 +124,14 @@ fn parse_args(app: &mut App, path: &Path) -> Result<()> {
         }
         _ => cmd.list().map(|_| ()),
     }
+}
+
+fn setup_logger(verbosity_level: u8) {
+    let level_filter = match verbosity_level {
+        1 => log::LevelFilter::Warn,
+        2 => log::LevelFilter::Info,
+        3 => log::LevelFilter::Trace,
+        _ => log::LevelFilter::Error,
+    };
+    SimpleLogger::new().with_level(level_filter).init().unwrap();
 }

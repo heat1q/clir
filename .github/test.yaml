@@ -1,0 +1,26 @@
+name: Test
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_INCREMENTAL: true
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: install toolchain
+      run: rustup toolchain install stable --profile minimal
+    - name: Clippy Lint
+      run: cargo clippy --no-deps
+    - name: Run tests
+      run: cargo test --verbose
