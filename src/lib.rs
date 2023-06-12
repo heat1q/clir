@@ -1,3 +1,8 @@
+#[cfg(not(target_family = "unix"))]
+compile_error!(
+    "Building clir on an unsupported platform. Only Unix-like platforms are currently supported."
+);
+
 use crate::cmd::Command;
 use crate::rules::Rules;
 use anyhow::{anyhow, Ok, Result};
@@ -11,6 +16,7 @@ mod path;
 mod rules;
 
 pub fn run() -> Result<()> {
+    #[allow(deprecated)]
     let config_path = env::home_dir()
         .ok_or_else(|| anyhow!("cannot find config file"))?
         .join(".clir");
