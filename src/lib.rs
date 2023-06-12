@@ -11,6 +11,9 @@ mod path;
 mod rules;
 
 pub fn run() -> Result<()> {
+    let config_path = env::home_dir()
+        .ok_or_else(|| anyhow!("cannot find config file"))?
+        .join(".clir");
     let current_dir = env::current_dir()?;
     let mut app = App::new("clir")
         .about("A command line cleaning utility.")
@@ -40,7 +43,7 @@ pub fn run() -> Result<()> {
                 .short('c')
                 .long("config")
                 .action(clap::ArgAction::Set)
-                .default_value(".clir")
+                .default_value(config_path.to_str().unwrap())
                 .value_hint(clap::ValueHint::FilePath),
         )
         .arg(
