@@ -40,7 +40,7 @@ impl<'a> Rules<'a> {
                         continue;
                     }
 
-                    if let Ok(pattern) = RawPattern::from_str(&line.to_string()) {
+                    if let Ok(pattern) = RawPattern::from_str(line) {
                         self.collection.insert(pattern);
                     }
                 }

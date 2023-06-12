@@ -3,28 +3,35 @@ Clir is a small CLI app written in Rust that helps you keep your filesystem clea
 
 ## Features
  - [x] Define custom global glob patterns to identify and remove unwanted files
- - [x] Highly configurable to suit your specific cleaning needs
- - [x] Cross-platform support
+ - [x] Minimalistic, formatted output for reporting disk usage of specified patterns
+ - [x] Supported on all Unix platforms
  
 ## Installation
-*coming soon*
+### Install from source
+(*requires rustc >= 1.56.0*)
+
+```shell
+cargo install --path .
+```
+
+Make sure that `${HOME}/.cargo/bin` is in your path!
 
 ## Usage
 To use clir, simply run the `clir` command followed by any additional arguments or options. Here are some examples:
 
 Add a new pattern:
-```bash
-$ clir add <pattern>
+```shell
+clir add <pattern>
 ```
 
 Print a report on currently defined patterns:
-```bash
-$ clir
+```shell
+clir
 ```
 
 Remove files associated with defined patterns:
-```bash
-$ clir -r
+```shell
+clir -r
 ```
 
 For a comprehensive list of all capabilities and options please run `clir --help`.

@@ -83,10 +83,12 @@ impl PathTree {
             .and_then(|p| p.traverse_tree(path.as_ref().strip_prefix(first).ok()?.as_os_str()))
     }
 
+    #[allow(dead_code)]
     pub fn contains_parent<P: AsRef<Path>>(&self, path: P) -> bool {
         self.traverse_tree(path).is_some()
     }
 
+    #[allow(dead_code)]
     pub fn contains_subpath<P: AsRef<Path>>(&self, subpath: P) -> bool {
         let Some(subpath) = canonicalize(subpath) else {
             return false;
