@@ -1,10 +1,9 @@
 use crate::{path::PathTree, rules::Pattern};
-use ansi_term::{ANSIString, Style};
+use ansi_term::{ANSIString, Color, Style};
 use anyhow::Result;
 use core::fmt;
 use io::Write;
 use std::{
-    convert::TryInto,
     fmt::Display,
     io,
     path::{Path, PathBuf},
@@ -27,8 +26,9 @@ pub(crate) fn format_patterns(
     Ok(())
 }
 
-const SCALE: i32 = 8;
+const SCALE: usize = 10;
 const NUM_TABLE_COLUMS: usize = 5;
+const BLOCK_CHAR: char = '\u{1fb0b}';
 
 struct FormatTable {
     entries: Vec<TableEntry>,
@@ -66,7 +66,7 @@ impl FormatTable {
         let mut column_widths = vec![0usize; NUM_TABLE_COLUMS];
         for entry in self.entries.iter() {
             entry.row.iter().enumerate().for_each(|(i, c)| {
-                let chars_count = c.as_ref().map(|s| s.chars().count()).unwrap_or(0);
+                let chars_count = c.as_ref().map(chars_count).unwrap_or(0);
                 column_widths[i] = column_widths[i].max(chars_count);
             })
         }
@@ -100,19 +100,13 @@ impl TableEntry {
         workdir: &Path,
         absolute_path: bool,
     ) -> Self {
-        let quota = (pattern.get_size_cached().unwrap_or(0) as f64 / total_size as f64
-            * SCALE as f64) as i32;
-        let quota = std::cmp::min(SCALE, quota + 1);
-        let used = "|".repeat(quota.try_into().unwrap_or(0));
-        let free = " ".repeat((SCALE - quota).try_into().unwrap_or(0));
-
         let row: [Option<ANSIString<'_>>; 5] = [
-            Some(format!("[{used}{free}]").into()),
+            Some(Self::format_quota(pattern, total_size)),
             Some(
                 SizeUnit::new(pattern.get_size_cached().unwrap_or(0), true)
                     .to_string()
                     .into(),
-            ), //TODO: size unit
+            ),
             Self::format_dirs(pattern.num_dirs()).map(|s| s.into()),
             Self::format_files(pattern.num_files()).map(|s| s.into()),
             Some(
@@ -141,7 +135,7 @@ impl TableEntry {
     fn summary(total_size: u64, num_files: usize, num_dirs: usize) -> Self {
         Self {
             row: [
-                Some("[||||||||]".into()),
+                Some(format!("[{}]", BLOCK_CHAR.to_string().repeat(SCALE)).into()),
                 Some(SizeUnit::new(total_size, true).to_string().into()),
                 Self::format_dirs(num_dirs).map(|s| s.into()),
                 Self::format_files(num_files).map(|s| s.into()),
@@ -155,7 +149,7 @@ impl TableEntry {
         for (i, col) in self.row.iter().enumerate() {
             match col {
                 Some(col) if i < NUM_TABLE_COLUMS - 1 => {
-                    let padding = " ".repeat(column_widths[i] - col.chars().count() + PADDING);
+                    let padding = " ".repeat(column_widths[i] - chars_count(col) + PADDING);
                     write!(w, "{col}{padding}")
                 }
                 Some(col) if i == NUM_TABLE_COLUMS - 1 => {
@@ -184,6 +178,46 @@ impl TableEntry {
             _ => Some(format!("\u{f07b} {num_dirs}")),
         }
     }
+
+    fn format_quota(pattern: &Pattern, total_size: u64) -> ANSIString<'static> {
+        let quota = (pattern.get_size_cached().unwrap_or(0) as f64 / total_size as f64
+            * SCALE as f64) as usize;
+        let quota = std::cmp::min(SCALE, quota + 1);
+        let diff = SCALE - quota;
+        let used = BLOCK_CHAR.to_string().repeat(quota);
+        let free = " ".repeat(diff);
+
+        const SCALE_50: usize = SCALE * 3 / 5;
+        const SCALE_80: usize = SCALE * 9 / 10;
+        let color = match quota {
+            _ if quota > SCALE_80 => Color::Red,
+            SCALE_50..=SCALE_80 => Color::Yellow,
+            _ => Color::Green,
+        };
+
+        format!("[{}]", color.paint(format!("{used}{free}"))).into()
+    }
+}
+
+fn chars_count(s: &ANSIString<'_>) -> usize {
+    let mut count = 0;
+    let mut is_ansi_style = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            is_ansi_style = true;
+            continue;
+        }
+        if is_ansi_style && c == 'm' {
+            is_ansi_style = false;
+            continue;
+        }
+        if is_ansi_style {
+            continue;
+        }
+        count += 1;
+    }
+
+    count as usize
 }
 
 fn format_pattern(pattern: &Pattern, workdir: &Path, absolute_path: bool) -> PathBuf {
